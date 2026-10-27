@@ -3419,12 +3419,29 @@
     mapContext.moveTo(0,-8);mapContext.lineTo(5,6);mapContext.lineTo(0,3);mapContext.lineTo(-5,6);mapContext.closePath();mapContext.fill();mapContext.stroke();mapContext.restore();
   }
   let shadowTime=0;
-  function frame(t) { const dt=Math.min((t-last)/1000||0,.033); last=t; update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderer.clear(); renderer.render(scene,camera); renderer.clearDepth(); renderer.render(handsScene,handsCamera); requestAnimationFrame(frame); }
+  let paused=false,pointerWasLocked=false,relockOnResume=false,pointerUnlockTime=0;
+  const pauseMenu=document.getElementById('pause-menu'),resumeButton=document.getElementById('resume-game');
+  function setPaused(value,lockLost=false) {
+    if(paused===value)return;
+    paused=value;pauseMenu.hidden=!value;document.querySelector('.game-shell').classList.toggle('is-paused',value);
+    if(value) {
+      relockOnResume=lockLost || document.pointerLockElement===canvas;
+      Object.keys(keys).forEach(key=>keys[key]=false);cancelWebGrab();swing(false);
+      if(document.pointerLockElement===canvas)document.exitPointerLock();
+      resumeButton.focus();
+    } else {
+      canvas.focus({preventScroll:true});
+      if(relockOnResume && canvas.requestPointerLock){const request=canvas.requestPointerLock();if(request?.catch)request.catch(()=>{});}
+      relockOnResume=false;
+    }
+  }
+  function frame(t) { const dt=Math.min((t-last)/1000||0,.033); last=t;if(paused){requestAnimationFrame(frame);return;} update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderer.clear(); renderer.render(scene,camera); renderer.clearDepth(); renderer.render(handsScene,handsCamera); requestAnimationFrame(frame); }
   const map={KeyW:'forward',ArrowUp:'forward',KeyS:'back',ArrowDown:'back',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right'};
-  window.addEventListener('keydown',e=>{ if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
+  window.addEventListener('keydown',e=>{ if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused){if(e.code==='Tab'){e.preventDefault();resumeButton.focus();}return;} if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
   window.addEventListener('keyup',e=>{ if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; });
   window.addEventListener('blur',()=>{ Object.keys(keys).forEach(k=>keys[k]=false); cancelWebGrab();swing(false); });
   canvas.addEventListener('pointerdown',e=>{
+    if(paused)return;
     e.preventDefault();
     if (e.pointerType==='mouse') {
       const locked=document.pointerLockElement===canvas;
@@ -3436,12 +3453,12 @@
     else { canvas.setPointerCapture(e.pointerId); }
   });
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
-  window.addEventListener('pointerup',e=>{if(e.pointerType==='mouse' && e.button===0){const locked=document.pointerLockElement===canvas,rect=canvas.getBoundingClientRect();endWebAction(locked?0:(e.clientX-rect.left)/rect.width*2-1,locked?0:1-(e.clientY-rect.top)/rect.height*2);}});
+  window.addEventListener('pointerup',e=>{if(!paused && e.pointerType==='mouse' && e.button===0){const locked=document.pointerLockElement===canvas,rect=canvas.getBoundingClientRect();endWebAction(locked?0:(e.clientX-rect.left)/rect.width*2-1,locked?0:1-(e.clientY-rect.top)/rect.height*2);}});
   document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas) { yaw-=e.movementX*.0025; pitch=THREE.MathUtils.clamp(pitch-e.movementY*.0025,-1.35,1.35); }});
   let touchX=0,touchY=0;
   canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'){touchX=e.clientX;touchY=e.clientY;}});
   canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse' && e.buttons){yaw-=(e.clientX-touchX)*.005;pitch=THREE.MathUtils.clamp(pitch-(e.clientY-touchY)*.005,-1.35,1.35);touchX=e.clientX;touchY=e.clientY;}});
-  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas){cancelWebGrab();swing(false);}});
+  document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(!locked && pointerWasLocked && !paused){pointerUnlockTime=performance.now();setPaused(true,true);}pointerWasLocked=locked;if(!locked && !paused){cancelWebGrab();swing(false);}});
   for (const id of ['forward','back','left','right','sprint','jump','swing','bomb','zip']) {
     const button=document.getElementById(id);
     button.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();button.setPointerCapture(e.pointerId);if(id==='jump')jump();else if(id==='swing')beginWebAction();else if(id==='bomb')fireBomb();else if(id==='zip')webZip();else keys[id]=true;});
@@ -3449,7 +3466,8 @@
     button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);
   }
   nukeButton.addEventListener('pointerdown',event=>event.stopPropagation());
-  nukeButton.addEventListener('click',event=>{event.stopPropagation();launchNuke();});
+  nukeButton.addEventListener('click',event=>{event.stopPropagation();if(!paused)launchNuke();});
+  resumeButton.addEventListener('click',()=>setPaused(false));
   window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();handsCamera.aspect=camera.aspect;handsCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
   // Batch the static details added after the buildings were constructed too.
   batchBuildingDetails();

@@ -84,5 +84,18 @@ kbd { display: inline-block; min-width: 24px; margin-right: 2px; padding: 3px 5p
 #blast-flash { position:absolute; inset:0; z-index:3; background:#fff0c8; opacity:0; pointer-events:none; }
 #blast-wind { position:absolute; inset:-15%; z-index:3; pointer-events:none; opacity:0; background:repeating-linear-gradient(164deg,transparent 0 48px,rgba(245,224,195,.22) 50px,transparent 54px 93px); animation:blast-wind 0.35s linear infinite; }
 #blast-blackout { position:absolute; inset:0; z-index:6; background:#000; opacity:0; pointer-events:none; }
+.pause-menu[hidden] { display:none; }
+.pause-menu { position:absolute; inset:0; z-index:10; display:grid; place-items:center; padding:20px; background:rgba(5,13,20,.78); color:#f3f4f1; }
+.pause-panel { width:min(100%,560px); max-height:calc(100vh - 40px); overflow:auto; padding:28px 32px; border:1px solid rgba(211,226,231,.2); border-radius:16px; background:#14232c; box-shadow:0 24px 80px rgba(0,0,0,.45); }
+.pause-eyebrow { margin:0 0 6px; color:#ee8880; font-size:11px; font-weight:800; letter-spacing:.2em; }
+.pause-panel h1 { margin:0; font-size:36px; letter-spacing:-.03em; }
+.pause-subtitle { margin:18px 0 8px; color:#aebfc5; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; }
+.pause-controls { margin:0; }
+.pause-controls > div { display:flex; justify-content:space-between; gap:16px; align-items:center; min-height:34px; border-bottom:1px solid rgba(220,235,238,.08); font-size:14px; }
+.pause-controls dt { color:#d8e1e1; }.pause-controls dd { margin:0; color:#fff; text-align:right; }.pause-controls dd span { color:#aebfc5; font-size:12px; }
+.pause-controls kbd { font-size:11px; padding:4px 6px; }
+.resume-game { width:100%; margin-top:22px; padding:13px; border:0; border-radius:8px; background:#c64a43; color:white; font-family:inherit; font-size:15px; font-weight:700; cursor:pointer; }
+.resume-game:hover,.resume-game:focus-visible { background:#e35c52; outline:2px solid #fff; outline-offset:3px; }
+.game-shell.is-paused #blast-wind { animation-play-state:paused; }
 @keyframes blast-wind { from { transform:translateX(-5%); } to { transform:translateX(5%); } }
 @media (max-width: 600px) { #minimap { width: 190px; height: 190px; top: 10px; right: 10px; } }

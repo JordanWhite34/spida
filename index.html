@@ -9,7 +9,7 @@
 </head>
 <body>
   <main class="game-shell">
-    <canvas id="game" aria-label="First-person city swinging game"></canvas>
+    <canvas id="game" tabindex="0" aria-label="First-person city swinging game"></canvas>
 
     <div id="speed-blur" class="speed-blur" aria-hidden="true"><div></div><div></div></div>
     <div class="screen-shade" aria-hidden="true"></div>
@@ -23,6 +23,27 @@
     <div class="mobile-controls" aria-label="Touch controls">
       <div class="mobile-move"><button id="forward" aria-label="Move forward">&#8593;</button><div><button id="left" aria-label="Move left">&#8592;</button><button id="back" aria-label="Move backward">&#8595;</button><button id="right" aria-label="Move right">&#8594;</button></div></div>
       <div class="mobile-actions"><button id="sprint" aria-label="Hold to sprint">&#187;</button><button id="jump" aria-label="Jump">&#8613;</button><button id="zip" aria-label="Web zip">&#10148;</button><button id="bomb" aria-label="Shoot a web bomb">&#10041;</button><button id="swing" aria-label="Hold to swing">&#9673;</button></div>
+    </div>
+    <div id="pause-menu" class="pause-menu" hidden>
+      <section class="pause-panel" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+        <p class="pause-eyebrow">SKYLINE SWING</p>
+        <h1 id="pause-title">Paused</h1>
+        <p class="pause-subtitle">Controls</p>
+        <dl class="pause-controls">
+          <div><dt>Move</dt><dd><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span>or arrow keys</span></dd></div>
+          <div><dt>Look / aim</dt><dd>Mouse</dd></div>
+          <div><dt>Swing / web an object</dt><dd>Hold left click</dd></div>
+          <div><dt>Web an object to a spot</dt><dd>Hold, aim, release</dd></div>
+          <div><dt>Web bomb</dt><dd>Right click</dd></div>
+          <div><dt>Web zip</dt><dd><kbd>E</kbd></dd></div>
+          <div><dt>Jump / wall jump</dt><dd><kbd>Space</kbd></dd></div>
+          <div><dt>Sprint / reel web in</dt><dd><kbd>Shift</kbd></dd></div>
+          <div><dt>Climb a wall</dt><dd>Hold forward against it</dd></div>
+          <div><dt>Launch nuke</dt><dd><kbd>N</kbd> <span>or ☢ button</span></dd></div>
+          <div><dt>Reset game</dt><dd><kbd>R</kbd></dd></div>
+        </dl>
+        <button id="resume-game" class="resume-game">Resume game</button>
+      </section>
     </div>
     <div id="error" class="error" hidden>Couldn&rsquo;t load the 3D engine. Check your internet connection and reload.</div>
   </main>
