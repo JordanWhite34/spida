@@ -6,7 +6,7 @@
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   renderer.autoClear = false;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
@@ -40,11 +40,51 @@
   })); scene.add(sky);
   const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, .3, 1300);
   camera.rotation.order='YXZ';
-  scene.add(new THREE.HemisphereLight(0xdbefff, 0x817b6d, 1.7));
-  const fill=new THREE.DirectionalLight(0x9dbcd5,.48);fill.position.set(80,55,-90);scene.add(fill);
-  const sun = new THREE.DirectionalLight(0xffd5aa, 2.5); sun.position.set(-60, 100, 40); sun.castShadow=true;
+  scene.add(new THREE.HemisphereLight(0xc7e0ff, 0x71665b, 1.05));
+  const fill=new THREE.DirectionalLight(0x9dbcd5,.38);fill.position.set(80,55,-90);scene.add(fill);
+  const sun = new THREE.DirectionalLight(0xffd5aa, 2.8); sun.position.set(-60, 100, 40); sun.castShadow=true;
   sun.shadow.mapSize.set(1024,1024); Object.assign(sun.shadow.camera,{left:-85,right:85,top:85,bottom:-85,near:1,far:300});
   sun.shadow.bias=-0.0003; sun.shadow.normalBias=.04; scene.add(sun); scene.add(sun.target);
+  // Bloom is rendered at quarter resolution so the glow stays inexpensive in the city.
+  const worldTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
+  worldTarget.texture.colorSpace = THREE.SRGBColorSpace;
+  const glowTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+  const postScene = new THREE.Scene();
+  const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const postVertex = `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}`;
+  const glowMaterial = new THREE.ShaderMaterial({
+    uniforms:{ source:{value:worldTarget.texture}, texel:{value:new THREE.Vector2(1,1)} },
+    vertexShader:postVertex, fragmentShader:`
+      varying vec2 vUv; uniform sampler2D source; uniform vec2 texel;
+      vec3 bright(vec2 uv){vec3 c=texture2D(source,uv).rgb;float l=max(max(c.r,c.g),c.b);return c*smoothstep(.68,.98,l);}
+      void main(){vec3 c=bright(vUv)*.227; c+=(bright(vUv+vec2(texel.x*1.4,0.0))+bright(vUv-vec2(texel.x*1.4,0.0)))*.316;
+        c+=(bright(vUv+vec2(texel.x*3.2,0.0))+bright(vUv-vec2(texel.x*3.2,0.0)))*.070;gl_FragColor=vec4(c,1.0);}`,
+    depthTest:false, depthWrite:false, toneMapped:false
+  });
+  const compositeMaterial = new THREE.ShaderMaterial({
+    uniforms:{ source:{value:worldTarget.texture}, glow:{value:glowTarget.texture}, texel:{value:new THREE.Vector2(1,1)} },
+    vertexShader:postVertex, fragmentShader:`
+      varying vec2 vUv; uniform sampler2D source; uniform sampler2D glow; uniform vec2 texel;
+      void main(){vec3 c=texture2D(source,vUv).rgb;vec3 b=texture2D(glow,vUv).rgb*.227;
+        b+=(texture2D(glow,vUv+vec2(0.0,texel.y*1.4)).rgb+texture2D(glow,vUv-vec2(0.0,texel.y*1.4)).rgb)*.316;
+        b+=(texture2D(glow,vUv+vec2(0.0,texel.y*3.2)).rgb+texture2D(glow,vUv-vec2(0.0,texel.y*3.2)).rgb)*.070;
+        gl_FragColor=vec4(c+b*.24,1.0);
+        #include <colorspace_fragment>
+      }`, depthTest:false, depthWrite:false, toneMapped:false
+  });
+  const postQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),glowMaterial); postQuad.frustumCulled=false; postScene.add(postQuad);
+  function resizePost() {
+    const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+    worldTarget.setSize(size.x,size.y); const w=Math.max(1,Math.floor(size.x/4)), h=Math.max(1,Math.floor(size.y/4));
+    glowTarget.setSize(w,h); glowMaterial.uniforms.texel.value.set(1/w,1/h); compositeMaterial.uniforms.texel.value.set(1/w,1/h);
+  }
+  resizePost();
+  function renderWorld() {
+    renderer.setRenderTarget(worldTarget); renderer.clear(); renderer.render(scene,camera);
+    postQuad.material=glowMaterial; renderer.setRenderTarget(glowTarget); renderer.clear(); renderer.render(postScene,postCamera);
+    postQuad.material=compositeMaterial; renderer.setRenderTarget(null); renderer.clear(); renderer.render(postScene,postCamera);
+    renderer.clearDepth(); renderer.render(handsScene,handsCamera);
+  }
   const material = color => new THREE.MeshStandardMaterial({ color, roughness: .88 });
   const mats = { road: material(0x4e5960), sidewalk: material(0xb8b5a9), line: material(0xf4e9c6), red: material(0xc93434), blue: material(0x243e74), dark: material(0x1f2633), white: material(0xf7f4e9), roof: material(0x536268) };
   const box = (w,h,d,mat,x,y,z,parent=scene) => { const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); mesh.position.set(x,y,z); parent.add(mesh); return mesh; };
@@ -1776,6 +1816,8 @@
     const turn=new THREE.Quaternion().setFromAxisAngle(axis,Math.PI),point=new THREE.Vector3();
     const flip=v=>v.sub(wrist).applyQuaternion(turn).add(wrist);
     group.userData.fingertip=flip(new THREE.Vector3(side<0?.29:-.29,.10,-.39));
+    group.userData.wingWrist=flip(new THREE.Vector3(side<0?.24:-.24,-.03,-.30));
+    group.userData.wingElbow=flip(new THREE.Vector3(side<0?.13:-.13,-.36,-.07));
     const colors=[];
     for(let i=0;i<positions.length;i+=3) {
       const sleeve=values[i+1]<-.02; const color=new THREE.Color(sleeve?0x213d66:0xb82b31);
@@ -1789,6 +1831,19 @@
     group.position.set(side*.47,-.59,-1.0); return group;
   }
   const leftHand=makeHand(-1), rightHand=makeHand(1);
+  // Lightweight foreground web wings, spread between the torso and forearms.
+  const glideWings=new THREE.Group();handsScene.add(glideWings);glideWings.visible=false;
+  const wingFilm=new THREE.MeshBasicMaterial({color:0xb1d6df,transparent:true,opacity:.13,side:THREE.DoubleSide,depthWrite:false});
+  const wingThread=new THREE.LineBasicMaterial({color:0xd5f0f4,transparent:true,opacity:.65,depthWrite:false});
+  const wingPanels=[];
+  for(const side of [-1,1]) {
+    const filmGeometry=new THREE.BufferGeometry(),vertices=new Float32Array(14*3),indices=[];
+    for(let i=0;i<6;i++){const j=i*2;indices.push(j,j+1,j+2,j+1,j+3,j+2);}
+    filmGeometry.setAttribute('position',new THREE.BufferAttribute(vertices,3));filmGeometry.setIndex(indices);
+    const lineGeometry=new THREE.BufferGeometry();lineGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(50*3),3));
+    const film=new THREE.Mesh(filmGeometry,wingFilm),threads=new THREE.LineSegments(lineGeometry,wingThread);
+    film.frustumCulled=threads.frustumCulled=false;glideWings.add(film,threads);wingPanels.push({side,filmGeometry,lineGeometry});
+  }
   // Foreground legs only enter the frame as the player lifts their knees in a swing.
   const swingLegs=new THREE.Group();handsScene.add(swingLegs);
   const legSuit=new THREE.MeshStandardMaterial({color:0x213d66,roughness:.72,flatShading:true});
@@ -1823,11 +1878,18 @@
   if(reticle) reticle.addEventListener('animationend',event=>{
     if(event.animationName==='reticle-hit')reticle.classList.remove('hit');
   });
-  let rope=null, webGrab=null, onGround=true, distance=0, elapsed=0, last=0, yaw=0, pitch=0, handBlend=0, swingPose=0, footPose=0, cameraRoll=0, feedbackTime=0, playerImpact=0, shockTime=0, attackImmunity=0, runPhase=0, runBlend=0, bombAnimation=0, mapTimer=0;
+  let rope=null, webGrab=null, onGround=true, distance=0, elapsed=0, last=0, yaw=0, pitch=0, handBlend=0, swingPose=0, footPose=0, glideBlend=0, glideEngaged=false, cameraRoll=0, feedbackTime=0, playerImpact=0, shockTime=0, attackImmunity=0, runPhase=0, runBlend=0, bombAnimation=0, mapTimer=0;
   let nuke=null,nukeRubble=null,blackout=0,blackoutMode='';
   let wallContact=null,wallRunTime=0,wallCooldown=0,zipTime=0,zipCooldown=0,zipAnchor=null;
   let recentDanger=null;
   let rescue=null,rescueTimer=10,rescueSequence=0;
+  const rescueNotice=document.getElementById('rescue-notice');let rescueNoticeTimer=null;
+  function hideRescueNotice() {if(rescueNoticeTimer!==null)clearTimeout(rescueNoticeTimer);rescueNoticeTimer=null;rescueNotice.hidden=true;}
+  function showRescueNotice(type) {
+    hideRescueNotice();
+    rescueNotice.textContent=type==='fall'?'Catch the falling person: hold left click, aim at a surface, and release.':'Stop the runaway vehicle: web it to a surface or use web bombs.';
+    rescueNotice.hidden=false;rescueNoticeTimer=setTimeout(hideRescueNotice,5000);
+  }
   const speedBlur=document.getElementById('speed-blur');let speedBlurAmount=0;
   function updateSpeedBlur(speed,dt) {
     const target=THREE.MathUtils.smoothstep(speed,12,55);
@@ -1872,7 +1934,7 @@
   }
   function reset() {
     clearNuke();
-    clearRescue();rescueTimer=10;rescueSequence=0;
+    clearRescue();hideRescueNotice();rescueTimer=10;rescueSequence=0;
     speedBlurAmount=0;speedBlur.style.opacity='0';speedBlur.style.visibility='hidden';
     cancelWebGrab();
     for(const actor of [...cars,...pedestrians])if(actor.webPinned)clearWebPin(actor);
@@ -1904,7 +1966,7 @@
     wallContact=null;wallRunTime=0;wallCooldown=0;zipTime=0;zipCooldown=0;zipAnchor=null;
     recentDanger=null;
     if(reticle)reticle.classList.remove('active','missed','hit');
-    yaw=0; pitch=0; handBlend=0; swingPose=0; footPose=0; cameraRoll=0; feedbackTime=0;runPhase=0;runBlend=0;bombAnimation=0;mapTimer=0; anchorMarker.visible=false; camera.fov=72;camera.updateProjectionMatrix();camera.position.set(0,1.7,8); camera.rotation.set(0,0,0,'YXZ');
+    yaw=0; pitch=0; handBlend=0; swingPose=0; footPose=0; glideBlend=0;glideEngaged=false;glideWings.visible=false; cameraRoll=0; feedbackTime=0;runPhase=0;runBlend=0;bombAnimation=0;mapTimer=0; anchorMarker.visible=false; camera.fov=72;camera.updateProjectionMatrix();camera.position.set(0,1.7,8); camera.rotation.set(0,0,0,'YXZ');
   }
   function jump() {
     if (rope) { swing(false); velocity.y=Math.max(velocity.y,7); onGround=false; }
@@ -2177,7 +2239,7 @@
   function clearNuke() {
     if(nuke) {
       for(const tree of nuke.trees||[]){tree.group.position.copy(tree.origin);tree.group.quaternion.copy(tree.rotation);}
-      for(const item of nuke.specials||[])if(item.dog){item.group.position.copy(item.origin);item.group.quaternion.copy(item.rotation);item.dog.leash.visible=true;}
+      for(const item of nuke.specials||[])if(item.dog||item.aircraft){item.group.position.copy(item.origin);item.group.quaternion.copy(item.rotation);if(item.dog)item.dog.leash.visible=true;}
       for(const saved of nuke.actorOrigins||[]){saved.actor.group.position.copy(saved.position);saved.actor.group.quaternion.copy(saved.rotation);}
       for(const flight of nuke.distantFlights||[]) {
         const b=flight.building;b.tower.setMatrixAt(b.towerIndex,b.towerMatrix);b.roof.setMatrixAt(b.roofIndex,b.roofMatrix);
@@ -2203,7 +2265,7 @@
     for(const side of [-1,1]){const fin=box(2.2,1.7,.12,tipMat,side*1.15,2.3,0,missile);fin.rotation.z=side*.25;}
     missile.position.copy(target);missile.position.y=300;
     const actorOrigins=[...cars,...pedestrians,...chargeProps].map(actor=>({actor,position:actor.group.position.clone(),rotation:actor.group.quaternion.clone()}));
-    nuke={group,missile,target,oceanDirection,time:0,phase:'fall',hitActors:new Set(),hitTrees:new Set(),hitDogs:new Set(),hitDistant:new Set(),distantFlights:[],distantBatches:new Map(),trees:[],flights:[],specials:[],fallingBuildings:[],debris:[],actorOrigins,playerHit:false};nukeButton.disabled=true;
+    nuke={group,missile,target,oceanDirection,time:0,phase:'fall',hitActors:new Set(),hitTrees:new Set(),hitDogs:new Set(),hitAircraft:new Set(),hitDistant:new Set(),distantFlights:[],distantBatches:new Map(),trees:[],flights:[],specials:[],fallingBuildings:[],debris:[],actorOrigins,playerHit:false};nukeButton.disabled=true;
   }
   function detonateNuke() {
     nuke.phase='blast';nuke.time=0;nuke.missile.visible=false;scene.updateMatrixWorld(true);
@@ -2325,6 +2387,12 @@
       nuke.hitDogs.add(dog);dog.leash.visible=false;
       const seed=dog.group.position.x*23+dog.group.position.z*17;
       nuke.specials.push({group:dog.group,dog,origin:dog.group.position.clone(),rotation:dog.group.quaternion.clone(),velocity:blastVelocity(dog.group.position,seed),spin:.8+random(seed+3)*2});
+    }
+    for(const aircraft of highAircraft) {
+      if(nuke.hitAircraft.has(aircraft) || aircraft.group.position.distanceTo(nuke.target)>radius)continue;
+      nuke.hitAircraft.add(aircraft);
+      const group=aircraft.group,seed=aircraft.phase*101+aircraft.height;
+      nuke.specials.push({group,aircraft,origin:group.position.clone(),rotation:group.quaternion.clone(),velocity:blastVelocity(group.position,seed),spin:.4+random(seed+3)*1.2});
     }
     for(const actor of [rhino,...villains]) {
       if(nuke.hitActors.has(actor) || Math.hypot(actor.group.position.x-nuke.target.x,actor.group.position.z-nuke.target.z)>radius)continue;
@@ -2778,7 +2846,7 @@
     } else {actor.currentSpeed=14;actor.lateralSpeed=0;}
     const marker=new THREE.Mesh(new THREE.TorusGeometry(.8,.08,6,24),new THREE.MeshBasicMaterial({color:0xffc75e,transparent:true,opacity:.85}));
     marker.userData.projectile=true;scene.add(marker);
-    rescue={type,actor,marker,time:0,result:'active',hits:new Set()};return true;
+    rescue={type,actor,marker,time:0,result:'active',hits:new Set()};showRescueNotice(type);return true;
   }
   function updateRescue(dt) {
     if(nuke){if(rescue)clearRescue();return;}
@@ -3184,6 +3252,7 @@
       heli.rotor.rotation.y=elapsed*18;heli.tailRotor.rotation.x=elapsed*25;
     }
     for(const aircraft of highAircraft) {
+      if(nuke?.hitAircraft.has(aircraft))continue;
       const t=elapsed*.07+aircraft.phase;
       aircraft.group.position.set(aircraft.x+Math.sin(t)*7,aircraft.height+Math.sin(t*.8)*3,aircraft.z+Math.cos(t)*6);
       if(aircraft.propeller)aircraft.propeller.rotation.z=elapsed*12;
@@ -3239,15 +3308,27 @@
         }
       }
       const waterHere=waterAt(position.x,position.z),wading=waterHere && position.y<waterHere.surface+.25;
-      const control=(onGround?(keys.sprint?64:32):rope?18:12)*(shockTime>0?.35:1)*(wading?.45:1);
+      const glideAllowed=keys.sprint && !onGround && !rope && !webGrab && zipTime<=0 && !wading;
+      const glideSpeed=Math.hypot(velocity.x,velocity.z);
+      glideEngaged=Boolean(glideAllowed && glideSpeed>=(glideEngaged?12:16));
+      const gliding=glideEngaged;
+      if(gliding && glideSpeed>0) {
+        const direction=new THREE.Vector3(velocity.x/glideSpeed,0,velocity.z/glideSpeed);
+        steering.addScaledVector(direction,-Math.max(0,steering.dot(direction)));
+      }
+      const control=(onGround?(keys.sprint?64:32):rope?18:gliding?18:12)*(shockTime>0?.35:1)*(wading?.45:1);
       velocity.addScaledVector(steering,control*step);
-      const drag=Math.exp(-(wading?5:onGround?4:rope?.025:.08)*step);
+      const drag=Math.exp(-(wading?5:onGround?4:rope?.025:gliding?.19:.08)*step);
       velocity.x*=drag;velocity.z*=drag;
       if(onGround) {
         const horizontal=Math.hypot(velocity.x,velocity.z),limit=wading?3.5:keys.sprint?18:9;
         if(horizontal>limit){velocity.x*=limit/horizontal;velocity.z*=limit/horizontal;}
       }
-      velocity.y-=18*step;
+      velocity.y-=(gliding?7:18)*step;
+      if(gliding) {
+        // Ease out of a dive rather than snapping the player to a terminal speed.
+        if(velocity.y< -8)velocity.y+=Math.min(-8-velocity.y,20*step);
+      }
       if(rope && rope.anchor.y>position.y+.5 && position.y<14) {
         // Ease a dangerous low arc upward before impact, while the web has a higher anchor.
         const predictedHeight=position.y+Math.min(velocity.y,0)*.6-3.24;
@@ -3350,6 +3431,13 @@
     rightHand.rotation.set(-handBlend*.28+velocity.y*.002-stride*.20-shot*.32,shot*.08,handBlend*.12-cameraRoll*.5-stride*.07);
     leftHand.position.set(-.47+sway+stride*.035,-.59+bob*1.5+(rope?.06:0)-stride*.10+lift*.025,-1.0-stride*.13);
     leftHand.rotation.set((rope?-.2:0)+stride*.20,0,-cameraRoll*.5+stride*.07);
+    const glideActive=glideEngaged && !onGround && !rope && !webGrab && !(nuke?.phase==='blast'&&nuke.playerHit);
+    glideBlend+=(Number(glideActive)-glideBlend)*(1-Math.exp(-(glideActive?7:12)*dt));
+    glideWings.visible=glideBlend>.02;wingFilm.opacity=.13*glideBlend;wingThread.opacity=.65*glideBlend;
+    for(const [hand,side] of [[leftHand,-1],[rightHand,1]]) {
+      hand.position.lerp(new THREE.Vector3(side*.76,-.43,-1.18),glideBlend);
+      hand.rotation.z+=side*.24*glideBlend;
+    }
     swingPose+=(Number(Boolean(rope))-swingPose)*(1-Math.exp(-7*dt));
     // Bring the two fingertips to either side of the same grip point. The web
     // starts at the right fingertip, so the visual tether stays on the hands.
@@ -3357,6 +3445,21 @@
       const grip=new THREE.Vector3(side*.065,-.18,-1.24);
       const tipOffset=hand.userData.fingertip.clone().applyEuler(hand.rotation);
       hand.position.lerp(grip.sub(tipOffset),swingPose);
+    }
+    if(glideWings.visible)for(const panel of wingPanels) {
+      const hand=panel.side<0?leftHand:rightHand;hand.updateWorldMatrix(true,false);
+      const elbow=hand.localToWorld(hand.userData.wingElbow.clone()),wrist=hand.localToWorld(hand.userData.wingWrist.clone());
+      const innerBottom=new THREE.Vector3(panel.side*.16,-.84,-1.02),innerTop=new THREE.Vector3(panel.side*.27,-.64,-1.25);
+      const outer=[],inner=[],middle=[],positions=panel.filmGeometry.attributes.position,threads=panel.lineGeometry.attributes.position;
+      for(let i=0;i<=6;i++) {
+        const t=i/6,a=elbow.clone().lerp(wrist,t),b=innerBottom.clone().lerp(innerTop,t);
+        b.y-=.025*Math.sin(t*Math.PI*6);outer.push(a);inner.push(b);middle.push(a.clone().lerp(b,.55));
+        positions.setXYZ(i*2,a.x,a.y,a.z);positions.setXYZ(i*2+1,b.x,b.y,b.z);
+      }
+      let n=0;const line=(a,b)=>{threads.setXYZ(n++,a.x,a.y,a.z);threads.setXYZ(n++,b.x,b.y,b.z);};
+      for(let i=0;i<=6;i++)line(outer[i],inner[i]);
+      for(let i=0;i<6;i++){line(outer[i],outer[i+1]);line(inner[i],inner[i+1]);line(middle[i],middle[i+1]);}
+      positions.needsUpdate=true;threads.needsUpdate=true;
     }
     let risingSwing=0;
     if(rope && rope.age>.15) {
@@ -3469,6 +3572,13 @@
       mapContext.fillStyle=villain.kind==='goblin'?'#ce8cff':villain.kind==='electro'?'#80eeff':'#a8d86c';
       mapContext.beginPath();mapContext.arc(vx,vy,4,0,Math.PI*2);mapContext.fill();
     }
+    if(rescue?.result==='active') {
+      const p=rescue.actor.group.position;let x=THREE.MathUtils.clamp(mapX(p.x)+offsetX,12,308),y=THREE.MathUtils.clamp(mapY(p.z)+offsetY,12,308);
+      const dx=x-160,dy=y-160,d=Math.hypot(dx,dy);if(d<20){x=160+(d?dx/d:0)*20;y=160+(d?dy/d:-1)*20;}
+      mapContext.fillStyle='#ffc75e';mapContext.strokeStyle='#30231b';mapContext.lineWidth=2;
+      mapContext.beginPath();mapContext.arc(x,y,8,0,Math.PI*2);mapContext.fill();mapContext.stroke();
+      mapContext.fillStyle='#211914';mapContext.font='bold 13px Arial';mapContext.textAlign='center';mapContext.textBaseline='middle';mapContext.fillText('!',x,y+.5);
+    }
     mapContext.save();mapContext.translate(160,160);mapContext.rotate(-yaw);
     mapContext.fillStyle='#fff';mapContext.strokeStyle='#17333e';mapContext.lineWidth=2;mapContext.beginPath();
     mapContext.moveTo(0,-8);mapContext.lineTo(5,6);mapContext.lineTo(0,3);mapContext.lineTo(-5,6);mapContext.closePath();mapContext.fill();mapContext.stroke();mapContext.restore();
@@ -3490,7 +3600,7 @@
       relockOnResume=false;
     }
   }
-  function frame(t) { const dt=Math.min((t-last)/1000||0,.033); last=t;if(paused){requestAnimationFrame(frame);return;} update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderer.clear(); renderer.render(scene,camera); renderer.clearDepth(); renderer.render(handsScene,handsCamera); requestAnimationFrame(frame); }
+  function frame(t) { const dt=Math.min((t-last)/1000||0,.033); last=t;if(paused){requestAnimationFrame(frame);return;} update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderWorld(); requestAnimationFrame(frame); }
   const map={KeyW:'forward',ArrowUp:'forward',KeyS:'back',ArrowDown:'back',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right'};
   window.addEventListener('keydown',e=>{ if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused){if(e.code==='Tab'){e.preventDefault();resumeButton.focus();}return;} if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
   window.addEventListener('keyup',e=>{ if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; });
@@ -3523,7 +3633,7 @@
   nukeButton.addEventListener('pointerdown',event=>event.stopPropagation());
   nukeButton.addEventListener('click',event=>{event.stopPropagation();if(!paused)launchNuke();});
   resumeButton.addEventListener('click',()=>setPaused(false));
-  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();handsCamera.aspect=camera.aspect;handsCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();handsCamera.aspect=camera.aspect;handsCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resizePost();});
   // Batch the static details added after the buildings were constructed too.
   batchBuildingDetails();
   // Keep distant actors interactive while rendering a low-cost silhouette.
