@@ -101,3 +101,6 @@ kbd { display: inline-block; min-width: 24px; margin-right: 2px; padding: 3px 5p
 .game-shell.is-paused #blast-wind { animation-play-state:paused; }
 @keyframes blast-wind { from { transform:translateX(-5%); } to { transform:translateX(5%); } }
 @media (max-width: 600px) { #minimap { width: 190px; height: 190px; top: 10px; right: 10px; } }
+
+.music-toggle { width:100%; margin-top:18px; padding:10px; border:1px solid rgba(211,226,231,.35); border-radius:8px; background:#233943; color:white; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.music-toggle:hover,.music-toggle:focus-visible { background:#35515d; outline:2px solid #fff; outline-offset:2px; }

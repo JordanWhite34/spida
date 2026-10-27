@@ -39,11 +39,13 @@
           <div><dt>Web zip</dt><dd><kbd>E</kbd></dd></div>
           <div><dt>Jump / wall jump</dt><dd><kbd>Space</kbd></dd></div>
           <div><dt>Sprint / reel web in</dt><dd><kbd>Shift</kbd></dd></div>
-          <div><dt>Glide while airborne</dt><dd>Hold <kbd>Shift</kbd></dd></div>
+          <div><dt>Glide while airborne</dt><dd>Hold <kbd>Shift</kbd> <span>and look up or down to pitch</span></dd></div>
           <div><dt>Climb a wall</dt><dd>Hold forward against it</dd></div>
           <div><dt>Launch nuke</dt><dd><kbd>N</kbd> <span>or ☢ button</span></dd></div>
           <div><dt>Reset game</dt><dd><kbd>R</kbd></dd></div>
         </dl>
+        <button id="music-toggle" class="music-toggle" type="button" aria-pressed="true">Music: On</button>
+        <button id="effects-toggle" class="music-toggle" type="button" aria-pressed="true">Sound effects: On</button>
         <button id="resume-game" class="resume-game">Resume game</button>
       </section>
     </div>
@@ -52,6 +54,7 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
+  <script src="assets/audio/nuke-audio-data.js"></script>
   <script src="game.js"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
   <script type="module" src="featured-model.js"></script>

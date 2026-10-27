@@ -19,3 +19,15 @@ Source: https://kenney.nl/assets/city-kit-suburban
 
 Corgi: Gobkit free Animal pack, CC0 1.0.
 Source: https://gobkit.com/freebies
+
+Nuke music: Lost in a bad place by congusbongus, CC0 1.0.
+Source: https://opengameart.org/content/lost-in-a-bad-place-horror-ambience-loop
+
+Nuke explosion: Muffled Distant Explosion by NenadSimic, CC0 1.0. A 1.5x amplified copy is included for direct file playback.
+Source: https://opengameart.org/content/muffled-distant-explosion
+
+Nuke crowd screams: human male scream small crowd panic fear by JohnsonBrandEditing, CC0 1.0.
+Source: https://freesound.org/people/JohnsonBrandEditing/sounds/173945/
+
+Nuke crowd screams layer: Cry for help - Collective by guamorims, CC0 1.0.
+Source: https://freesound.org/people/guamorims/sounds/391366/
