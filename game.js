@@ -180,6 +180,7 @@
   const stone=material(0xaca79d), darkGlass=new THREE.MeshStandardMaterial({color:0x344e58,roughness:.3,metalness:.25}), awning=material(0x6b3435), metal=material(0x68747a);
   const cranePaint=new THREE.MeshStandardMaterial({color:0xd6aa39,roughness:.55,metalness:.25});
   const cableMat=material(0x404449);
+  const fallenCableMaterial=new THREE.LineBasicMaterial({color:0x454b4a});
   function beamBetween(parent,a,b,radius,mat) {
     const start=new THREE.Vector3(...a),end=new THREE.Vector3(...b),delta=end.clone().sub(start);
     const beam=new THREE.Mesh(new THREE.CylinderGeometry(radius,radius,delta.length(),8),mat);
@@ -1527,11 +1528,13 @@
         const height=Math.max(12,b.height*.63),z=b.z-b.d/2-1.05;
         const platform=new THREE.Group();platform.position.set(b.x,height,z);platform.userData.targetable=true;scene.add(platform);
         box(3.2,.18,1.1,metalTrim,0,0,0,platform);box(3.2,.09,.09,metalTrim,0,1,-.48,platform);
-        for(const side of [-1,1]){box(.09,1,.09,metalTrim,side*1.5,.5,-.48,platform);beamBetween(platform,[side*1.4,0,0],[side*1.4,b.height-height,0],.025,cableMat);}
+        const cables=[];
+        for(const side of [-1,1]){box(.09,1,.09,metalTrim,side*1.5,.5,-.48,platform);cables.push(beamBetween(platform,[side*1.4,0,0],[side*1.4,b.height-height,0],.025,cableMat));}
         const worker=makePedestrian(b.x,z,1700+i,blockX,blockZ);worker.group.position.y=height+.1;worker.group.rotation.y=Math.PI;
         worker.settled=true;worker.rooftop=true;worker.rooftopKind='washer';
         oval(worker.head,mustard,0,.2,0,.16,.055,.15);
         box(.055,.58,.055,metalTrim,0,-.65,0,worker.rightArm);box(.32,.06,.07,metalTrim,0,-.96,0,worker.rightArm);
+        if(!b.washers)b.washers=[];b.washers.push({platform,worker,cables,origin:platform.position.clone(),roof:b.height,fall:null});
       } else {
         const viewer=makePedestrian(b.x+b.w/2-.65,b.z,1800+i,blockX,blockZ);
         viewer.group.position.y=b.height-.55;viewer.group.rotation.y=-Math.PI/2;
@@ -2076,6 +2079,19 @@
     for(let i=splatters.length-1;i>=0;i--)if(splatters[i].userData.webStructure===building){disposeWeb(splatters[i]);splatters.splice(i,1);}
     if(rope && (building.grappleParts.includes(rope.anchorObject) || (rope.anchorObject.userData.structures && rope.anchorObject.userData.structures[rope.anchorInstance]===building)))swing(false);
     building.rooftopOccupants=[];
+    for(const washer of building.washers||[]) {
+      const worker=washer.worker;
+      if(worker.rooftop && !worker.dead) {
+        building.rooftopOccupants.push({npc:worker,position:worker.group.position.clone(),yaw:worker.group.rotation.y});
+        worker.rooftop=false;worker.settled=false;
+        if(!worker.webHeld && !worker.webPinned) {
+          if(worker.knockback)recoverKnockback(worker);
+          throwActor(worker,new THREE.Vector3(0,0,1),true);
+          if(worker.knockback){worker.knockback.velocity.set(0,0,0);worker.knockback.ground=waterAt(worker.group.position.x,worker.group.position.z)?.floor??.12;}
+        }
+      }
+      startWasherFall(washer);
+    }
     for(const npc of pedestrians)if(npc.rooftop && Math.abs(npc.group.position.x-building.x)<building.w/2+2 && Math.abs(npc.group.position.z-building.z)<building.d/2+2 && npc.group.position.y>=building.height-3) {
       building.rooftopOccupants.push({npc,position:npc.group.position.clone(),yaw:npc.group.rotation.y});
       if(npc.webPinned)clearWebPin(npc);if(npc.stuck)releaseActorWeb(npc);
@@ -2107,11 +2123,49 @@
       rubble.mesh.instanceMatrix.needsUpdate=true;rubble.mesh.computeBoundingSphere();rubble.active=moving;
     }
   }
+  function startWasherFall(washer) {
+    if(washer.fall)return;
+    for(const cable of washer.cables)cable.removeFromParent();
+    const lines=washer.cables.map(()=>{
+      const geometry=new THREE.BufferGeometry().setFromPoints(Array.from({length:81},()=>new THREE.Vector3()));
+      const line=new THREE.Line(geometry,fallenCableMaterial);line.frustumCulled=false;scene.add(line);return line;
+    });
+    const wet=waterAt(washer.origin.x,washer.origin.z);
+    washer.fall={time:0,speed:0,floor:wet?wet.floor+.12:.12,coil:0,lines,complete:false};
+    updateWasher(washer,0);
+  }
+  function updateWasher(washer,dt) {
+    const fall=washer.fall;if(!fall || fall.complete)return;
+    fall.time+=dt;fall.speed+=22*dt;
+    washer.platform.position.y=Math.max(fall.floor,washer.platform.position.y-fall.speed*dt);
+    const upper=Math.max(fall.floor,washer.roof-11*fall.time*fall.time);
+    if(upper<=fall.floor+.02 && washer.platform.position.y<=fall.floor+.02)fall.coil=Math.min(1,fall.coil+dt*2);
+    for(let sideIndex=0;sideIndex<2;sideIndex++) {
+      const side=sideIndex===0?-1:1,coords=fall.lines[sideIndex].geometry.attributes.position;
+      for(let i=0;i<=80;i++) {
+        const t=i/80,angle=t*Math.PI*8*side,radius=.04+t*.55;
+        const x=washer.platform.position.x+side*1.4+Math.cos(angle)*radius*fall.coil;
+        const z=washer.platform.position.z+Math.sin(angle)*radius*fall.coil;
+        const straight=washer.platform.position.y+(upper-washer.platform.position.y)*t;
+        coords.setXYZ(i,x,THREE.MathUtils.lerp(straight,fall.floor+.04,fall.coil),z);
+      }
+      coords.needsUpdate=true;
+    }
+    fall.complete=fall.coil>=1;
+  }
+  function resetWasher(washer) {
+    if(!washer.fall)return;
+    for(const line of washer.fall.lines){line.removeFromParent();line.geometry.dispose();}
+    washer.platform.position.copy(washer.origin);washer.platform.rotation.set(0,0,0);
+    for(const cable of washer.cables)washer.platform.add(cable);
+    washer.fall=null;
+  }
   function resetBuildings() {
     for(const building of destructibleBuildings) {
       building.hits=0;
       if(!building.destroyed)continue;
       building.destroyed=false;
+      for(const washer of building.washers||[])resetWasher(washer);
       for(const part of building.parts)if(part.parent && !part.userData.modelReplaced)part.visible=true;
       for(const part of building.instanceParts){part.batch.setMatrixAt(part.index,part.matrix);part.batch.instanceMatrix.needsUpdate=true;}
       for(const mesh of building.grappleParts)grappleMeshes.push(mesh);
@@ -3023,6 +3077,7 @@
   }
   function updateWorld(dt) {
     updateRubble(dt);
+    for(const building of destructibleBuildings)if(building.destroyed && building.washers)for(const washer of building.washers)updateWasher(washer,dt);
     const actors=[...cars,...pedestrians.filter(npc=>!npc.dead)];
     updateRhino(dt,[...actors,...chargeProps]);
     updateVillains(dt,actors);updateEnemyProjectiles(dt,actors);
