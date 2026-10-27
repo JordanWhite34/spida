@@ -2256,16 +2256,20 @@
   }
   function launchNuke() {
     if(nuke)return;
-    const oceanDirection=position.x>=0?1:-1;
-    const target=new THREE.Vector3(THREE.MathUtils.clamp(position.x-oceanDirection*55,-230,230),0,THREE.MathUtils.clamp(position.z,worldMinZ+30,230));
+    // The crosshair targets the nearest visible world surface, including roofs and water.
+    camera.rotation.set(pitch,yaw,cameraRoll,'YXZ');camera.updateMatrixWorld();scene.updateMatrixWorld(true);
+    raycaster.far=camera.far;raycaster.setFromCamera(new THREE.Vector2(0,0),camera);
+    const hit=raycaster.intersectObjects(staticWebSurfaces(),true)[0];
+    if(!hit){feedbackTime=1.3;return false;}
+    const target=hit.point.clone();
     const group=new THREE.Group(),missile=new THREE.Group();scene.add(group);group.add(missile);
     const metal=new THREE.MeshStandardMaterial({color:0x69777a,metalness:.65,roughness:.35}),tipMat=new THREE.MeshStandardMaterial({color:0xa12c21,roughness:.6});
     const body=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,7,12),metal);missile.add(body);
     const nose=new THREE.Mesh(new THREE.ConeGeometry(1.1,2.4,12),tipMat);nose.position.y=-4.7;nose.rotation.z=Math.PI;missile.add(nose);
     for(const side of [-1,1]){const fin=box(2.2,1.7,.12,tipMat,side*1.15,2.3,0,missile);fin.rotation.z=side*.25;}
-    missile.position.copy(target);missile.position.y=300;
+    missile.position.copy(target);missile.position.y=target.y+300;
     const actorOrigins=[...cars,...pedestrians,...chargeProps].map(actor=>({actor,position:actor.group.position.clone(),rotation:actor.group.quaternion.clone()}));
-    nuke={group,missile,target,oceanDirection,time:0,phase:'fall',hitActors:new Set(),hitTrees:new Set(),hitDogs:new Set(),hitAircraft:new Set(),hitDistant:new Set(),distantFlights:[],distantBatches:new Map(),trees:[],flights:[],specials:[],fallingBuildings:[],debris:[],actorOrigins,playerHit:false};nukeButton.disabled=true;
+    nuke={group,missile,target,time:0,phase:'fall',hitActors:new Set(),hitTrees:new Set(),hitDogs:new Set(),hitAircraft:new Set(),hitDistant:new Set(),distantFlights:[],distantBatches:new Map(),trees:[],flights:[],specials:[],fallingBuildings:[],debris:[],actorOrigins,playerHit:false};nukeButton.disabled=true;
   }
   function detonateNuke() {
     nuke.phase='blast';nuke.time=0;nuke.missile.visible=false;scene.updateMatrixWorld(true);
@@ -2283,7 +2287,7 @@
       puff.scale.set(size,size,1);cloud.add(puff);nuke.cloudPuffs.push({puff,size,cap,angle});
     }
     const wave=new THREE.Mesh(new THREE.RingGeometry(.96,1,80),new THREE.MeshBasicMaterial({color:0xffd897,transparent:true,opacity:.75,side:THREE.DoubleSide,depthWrite:false}));
-    wave.rotation.x=-Math.PI/2;wave.position.set(nuke.target.x,.2,nuke.target.z);nuke.group.add(wave);nuke.wave=wave;
+    wave.rotation.x=-Math.PI/2;wave.position.set(nuke.target.x,nuke.target.y+.2,nuke.target.z);nuke.group.add(wave);nuke.wave=wave;
     if(nukeRubble){nukeRubble.removeFromParent();nukeRubble.dispose();}
     nukeRubble=new THREE.InstancedMesh(rubbleGeometry,stone,destructibleBuildings.length*2);nukeRubble.count=0;nukeRubble.frustumCulled=false;scene.add(nukeRubble);
   }
@@ -2317,7 +2321,7 @@
     if(!nuke)return;
     nuke.time+=dt;
     if(nuke.phase==='fall') {
-      const t=Math.min(1,nuke.time/3);nuke.missile.position.y=300-295*t*t;
+      const t=Math.min(1,nuke.time/3);nuke.missile.position.y=nuke.target.y+300-294.1*t*t;
       nuke.missile.rotation.y+=dt*2;
       if(t===1)detonateNuke();
       return;
@@ -2325,7 +2329,7 @@
     const radius=Math.min(1700,nuke.time*300),wave=nuke.wave;
     wave.scale.setScalar(Math.max(1,radius));wave.material.opacity=Math.max(0,.7-nuke.time*.16);
     nuke.cloud.scale.setScalar(Math.min(2.4,.4+nuke.time*.35));
-    nuke.cloud.position.y=Math.min(25,nuke.time*4);
+    nuke.cloud.position.y=nuke.target.y+Math.min(25,nuke.time*4);
     for(const item of nuke.cloudPuffs) {
       const pulse=1+.08*Math.sin(nuke.time*2+item.angle);
       item.puff.scale.set(item.size*pulse,item.size*pulse,1);
@@ -2408,10 +2412,13 @@
       rubbleTransform.position.copy(piece.position);rubbleTransform.rotation.set(piece.angle*.5,piece.angle,piece.angle*.3);rubbleTransform.scale.set(piece.size,piece.size*.6,piece.size*.8);rubbleTransform.updateMatrix();nukeRubble.setMatrixAt(i,rubbleTransform.matrix);
     });
     if(nuke.debris.length)nukeRubble.instanceMatrix.needsUpdate=true;
-    if(!nuke.playerHit && Math.hypot(position.x-nuke.target.x,position.z-nuke.target.z)<=radius) {
+    if(!nuke.playerHit) {
+      // The blast always reaches the player and throws them away from its impact.
       nuke.playerHit=true;cancelWebGrab();swing(false);
-      const direction=position.clone().sub(nuke.target);direction.y=0;if(direction.lengthSq()<.01)direction.set(0,0,1);
-      direction.normalize();velocity.set(nuke.oceanDirection*210,110,0);position.y=Math.max(position.y,.2);onGround=false;playerImpact=1.4;
+      const direction=position.clone().add(new THREE.Vector3(0,1,0)).sub(nuke.target);
+      if(direction.lengthSq()<.01)direction.set(Math.sin(yaw),0,Math.cos(yaw));
+      velocity.copy(direction.normalize().multiplyScalar(210));velocity.y+=35;
+      position.y=Math.max(position.y,.2);onGround=false;playerImpact=1.4;
     }
     if(nuke.time>5.5) {
       blackout=Math.min(1,(nuke.time-5.5)/1.5);blastBlackout.style.opacity=String(blackout);
