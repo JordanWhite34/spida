@@ -1988,25 +1988,22 @@
   }
   function prepareNukeAudio() {
     if(nukeMusic || !soundContext)return;
+    nukeMusic=new Audio('assets/audio/nuke-dread.ogg');nukeMusic.preload='auto';
+    // Web Audio silences media-element sources loaded through file:// in Chrome.
+    // Play those elements directly in that case, using a pre-amplified boom.
     const localFile=location.protocol==='file:';
-    // Embedded sources can be routed through Web Audio even when opened from disk.
-    const embedded=window.NUKE_AUDIO_DATA;
-    nukeMusic=new Audio(embedded?.music||'assets/audio/nuke-dread.ogg');nukeMusic.preload='auto';
-    nukeBoom=new Audio(embedded?.boom||(localFile?'assets/audio/nuke-boom-boosted.wav':'assets/audio/nuke-boom.wav'));nukeBoom.preload='auto';
+    nukeBoom=new Audio(localFile?'assets/audio/nuke-boom-boosted.wav':'assets/audio/nuke-boom.wav');nukeBoom.preload='auto';
     nukeScreams=new Audio('assets/audio/nuke-crowd.mp3');nukeScreams.preload='auto';
     nukeCrowdLayer=new Audio('assets/audio/nuke-crowd-layer.mp3');nukeCrowdLayer.preload='auto';
     for(const audio of [nukeBoom,nukeScreams,nukeCrowdLayer])audio.muted=!effectsEnabled;
-    if(localFile&&!embedded){nukeMusic.volume=1;nukeBoom.volume=1;nukeScreams.volume=.3;nukeCrowdLayer.volume=.18;return;}
+    if(localFile){nukeMusic.volume=1;nukeBoom.volume=1;nukeScreams.volume=.3;nukeCrowdLayer.volume=.18;return;}
     nukeCrowdLayer.volume=.65;
     const musicGain=soundContext.createGain(),boomGain=soundContext.createGain(),screamGain=soundContext.createGain(),distanceFilter=soundContext.createBiquadFilter();
     musicGain.gain.value=1;boomGain.gain.value=1.5;screamGain.gain.value=.25;distanceFilter.type='lowpass';distanceFilter.frequency.value=1900;
     soundContext.createMediaElementSource(nukeMusic).connect(musicGain);musicGain.connect(soundContext.destination);
     soundContext.createMediaElementSource(nukeBoom).connect(boomGain);boomGain.connect(effectsBus);
-    if(localFile){nukeScreams.volume=.3;nukeCrowdLayer.volume=.18;}
-    else {
-      soundContext.createMediaElementSource(nukeScreams).connect(distanceFilter);
-      soundContext.createMediaElementSource(nukeCrowdLayer).connect(distanceFilter);distanceFilter.connect(screamGain);screamGain.connect(effectsBus);
-    }
+    soundContext.createMediaElementSource(nukeScreams).connect(distanceFilter);
+    soundContext.createMediaElementSource(nukeCrowdLayer).connect(distanceFilter);distanceFilter.connect(screamGain);screamGain.connect(effectsBus);
   }
   function playNukeMusic() {
     if(!musicEnabled)return;unlockSound();prepareNukeAudio();
@@ -2031,11 +2028,14 @@
     nukeFallGain.gain.setTargetAtTime(.0001,now,.025);nukeFallTone.stop(now+.15);
     nukeFallTone=null;nukeFallGain=null;
   }
+  function playNukeCrowd() {
+    unlockSound();prepareNukeAudio();
+    for(const audio of [nukeScreams,nukeCrowdLayer])if(audio){audio.loop=true;audio.play().catch(()=>{});}
+  }
   function playNukeBoom() {
     stopNukeFallSound();unlockSound();prepareNukeAudio();
+    for(const audio of [nukeScreams,nukeCrowdLayer])if(audio){audio.pause();audio.currentTime=0;}
     if(nukeBoom){nukeBoom.currentTime=0;nukeBoom.play().catch(()=>{});}
-    if(nukeScreams){nukeScreams.currentTime=0;nukeScreams.play().catch(()=>{});}
-    if(nukeCrowdLayer){nukeCrowdLayer.currentTime=0;nukeCrowdLayer.play().catch(()=>{});}
   }
   function stopNukeAudio() {
     stopNukeFallSound();
@@ -2484,7 +2484,7 @@
     if(!nuke)return;
     nuke.time+=dt;
     if(nuke.phase==='warning') {
-      if(nuke.time>=4){nuke.phase='fall';nuke.time=0;nuke.missile.visible=true;startNukeFallSound();}
+      if(nuke.time>=4){nuke.phase='fall';nuke.time=0;nuke.missile.visible=true;startNukeFallSound();playNukeCrowd();}
       return;
     }
     if(nuke.phase==='fall') {
@@ -3811,10 +3811,8 @@
       resumeButton.focus();
     } else {
       if(nuke && musicEnabled)playNukeMusic();
-      if(nuke?.phase==='fall')startNukeFallSound();
+      if(nuke?.phase==='fall'){startNukeFallSound();playNukeCrowd();}
       if(nuke?.phase==='blast' && nukeBoom && !nukeBoom.ended && nukeBoom.currentTime>0)nukeBoom.play().catch(()=>{});
-      if(nuke?.phase==='blast' && nukeScreams && !nukeScreams.ended)nukeScreams.play().catch(()=>{});
-      if(nuke?.phase==='blast' && nukeCrowdLayer && !nukeCrowdLayer.ended)nukeCrowdLayer.play().catch(()=>{});
       canvas.focus({preventScroll:true});
       if(relockOnResume && canvas.requestPointerLock){const request=canvas.requestPointerLock();if(request?.catch)request.catch(()=>{});}
       relockOnResume=false;
