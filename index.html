@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Skyline Swing</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <main class="game-shell">
@@ -24,6 +24,11 @@
     </div>
     <div class="opinion" aria-label="Public opinion"><span>PUBLIC OPINION</span><b id="opinion-label">MID</b><i><em id="opinion-bar"></em></i><div id="villain-tracker" class="villain-tracker"></div><div id="activity" class="activity"></div></div>
     <div id="race-hud" class="race-hud" hidden></div>
+    <div class="hero-hud" aria-label="Health and level"><div class="hp"><span>HP</span><i><em id="hp-bar"></em></i></div><div class="lvl"><b id="level-label">LV 1</b><i><em id="xp-bar"></em></i></div></div>
+    <div id="mission" class="mission" hidden><small id="mission-step"></small><b id="mission-title"></b><span id="mission-text"></span><em id="mission-distance"></em></div>
+    <div id="hits" class="hits" hidden></div>
+    <div id="district" class="district" hidden><b></b><span></span></div>
+    <div class="sense-edge" aria-hidden="true"></div>
     <div id="breaking" class="breaking" role="status" aria-live="polite" hidden><b>BREAKING</b><span id="breaking-text"></span></div>
     <div id="boss-bar" class="boss-bar" hidden><div class="boss-head"><strong id="boss-name"></strong><em id="boss-tag"></em></div><small id="boss-title"></small><i><span id="boss-health"></span></i></div>
     <div id="blast-flash" aria-hidden="true"></div>
@@ -54,12 +59,15 @@
           <div><dt>Climb a wall</dt><dd>Hold forward against it</dd></div>
           <div><dt>Spider-slap</dt><dd><kbd>F</kbd> <span>or middle click</span></dd></div>
           <div><dt>Spider-sense slow-mo</dt><dd>Hold <kbd>T</kbd></dd></div>
-          <div><dt>Web launch + barrel roll</dt><dd><kbd>Space</kbd> <span>while swinging fast</span></dd></div>
           <div><dt>Yeet a webbed thing</dt><dd>Grab it, aim at the sky, release</dd></div>
+          <div><dt>Finisher</dt><dd>Land 6 hits, then slap</dd></div>
+          <div><dt>Perfect dodge</dt><dd><kbd>Space</kbd> <span>when spider-sense flashes red</span></dd></div>
           <div><dt>Fight villains</dt><dd>Webs, slaps, or throw people and cars at them</dd></div>
           <div><dt>Launch nuke</dt><dd><kbd>N</kbd> <span>unlock by beating every villain or 250,000 chaos</span></dd></div>
           <div><dt>Reset game</dt><dd><kbd>R</kbd></dd></div>
         </dl>
+        <p class="pause-subtitle">Suits</p>
+        <div class="mutators" id="suits"></div>
         <p class="pause-subtitle">Mutators</p>
         <div class="mutators">
           <button type="button" data-mutator="moon" aria-pressed="false">Moon gravity</button>
@@ -75,9 +83,10 @@
     <div id="error" class="error" hidden>Couldn&rsquo;t load the 3D engine. Check your internet connection and reload.</div>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+  <script src="toy-models.js?v=4"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
-  <script src="game.js"></script>
+  <script src="game.js?v=4"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
   <script type="module" src="featured-model.js"></script>
 </body>
