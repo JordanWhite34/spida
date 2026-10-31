@@ -37,8 +37,8 @@ Manhattan runs from Harlem down past Central Park, Midtown (Times Square, the Em
 - **Level up.** Heroics earn XP. Levels unlock a double jump, ground pound, faster web zips, faster finishers and new suits (pick them in the pause menu).
 - **Don't get knocked out.** You have health now; it regenerates when you stay out of trouble. Hospital bills are not covered.
 - **Cause chaos.** Body-check, stomp, slap and yeet citizens for chaos points and combo multipliers. Thrown people bowl others over and splat against walls. They get back up eventually.
-- **Fight villains.** Rhino, Electro, the Green Goblin and Doc Ock each haunt a neighborhood. A breaking-news alert says when one shows up. Wear them down with webs, slaps, and by throwing people and cars at them. Each third of their health stuns them briefly.
-- **Unlock the nuke** by beating every villain, or by causing 250,000 chaos.
+- **Fight villains.** Rhino, Electro, the Green Goblin and Doc Ock each haunt a neighborhood. A breaking-news alert says when one shows up. They hit hard, heal if you run off, and each has a trick: Rhino's front is armored (hit him from behind, or dodge a charge so he crashes into a building and gets dazed), Electro shocks you if you slap him before webs stun him, the Goblin throws bomb volleys when enraged, and Doc Ock hurls cars. Throwing people and cars at them does the most damage.
+- **Unlock the nuke** by beating every villain, or by causing 250,000 chaos. When it's called, the whole city runs for it.
 - **Find the 40 golden pizza slices** hidden on rooftops and landmarks.
 - **Race** through rings on four courses; fly through a glowing start ring to begin.
 - **Rescue people** when the alerts pop up, or don't. Public opinion is watching.

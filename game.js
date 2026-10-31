@@ -922,7 +922,7 @@
     const direction=random(seed+1)>.5?1:-1;
     const person={group,head,leftLeg:limbs[0],rightLeg:limbs[1],leftArm:limbs[2],rightArm:limbs[3],
       route,blockX,blockZ,target:direction===1?0:3,direction,speed:1.05+random(seed+4)*.45,seed,step:0,pause:random(seed+7)*2,hx:.34,hz:.34,top:2.3,uprightTop:2.3,webRemaining:0,webPose:0,visit:null,stuck:false};
-    group.userData.actor=person;pedestrians.push(person);return person;
+    person.proxyColor=shirt.color;group.userData.actor=person;pedestrians.push(person);return person;
   }
   const dogCoats=[material(0xa67d58),material(0x4d4036),material(0xd3c1a0)];
   const leashMat=new THREE.LineBasicMaterial({color:0x58423a});
@@ -1390,6 +1390,14 @@
           const person=makePedestrian(x+6.4,z+12,seed,x,z);
           if(random(seed+33)>.84)makeDog(person,seed+800);
           else if(random(seed+55)>.91)makeWheelchair(person);
+        }
+        // Busy neighborhoods get extra walkers spread around the block.
+        const district=districtAt(x+20,z+20),extra=district==='midtown'||district==='fidi'?3:district==='village'||district==='downtown-brooklyn'||district==='uptown'?2:1;
+        for(let k=0;k<extra;k++) {
+          const edge=Math.floor(random(seed+900+k*7)*4),f=.1+random(seed+930+k*11)*.8;
+          const px=edge===0?x+6.4+f*27.2:edge===1?x+33.6:edge===2?x+33.6-f*27.2:x+6.4,pz=edge===0?z+6.4:edge===1?z+6.4+f*27.2:edge===2?z+33.6:z+33.6-f*27.2;
+          if(inPark(px,pz) || waterAt(px,pz) || nearCurvedRoad(px,pz,5) || px>worldMaxX-2 || pz>worldMaxZ-2)continue;
+          const walker=makePedestrian(px,pz,seed*7+k*131+5,x,z);walker.target=walker.direction===1?(edge+1)%4:edge;
         }
       }
     }
@@ -2188,6 +2196,7 @@
     saved:['My hero!','You smell weird but thanks','Took you long enough','I would\'ve been fine','Put me down please','Is this sticky stuff... clean?','I\'m posting this'],
     webbed:['Mmmph!','Sticky in a BAD way','Oh, come ON','I\'m late for work!','This is assault','Is this... organic?','Unhand me, bug boy'],
     greet:['Hey it\'s Spider-Man!','Pay your rent, Peter!','Do a flip!','Are those pajamas?','My kid loves you. I don\'t.','Please don\'t.','Oh no. Not him.','Sign my cast? You broke it.','You owe me a hot dog','Menace!!'],
+    panic:['RUN!!!','IS THAT A NUKE?!','I LEFT THE STOVE ON','NOT TODAY','I DIDN\'T EVEN GET BRUNCH','WHY IS IT ALWAYS NEW YORK','THIS IS NOT IN MY LEASE','MOMMY!!','SPIDER-MAN WHAT DID YOU DO','worth it','MY DEPOSIT!','EVERY MAN FOR HIMSELF'],
     revive:['...I\'m okay!','I\'M FINE','Walk it off, Gary','Cartoon physics, baby','Back from the dead, still late']
   };
   const opinionTiers=[[0,'PUBLIC ENEMY #1'],[15,'MENACE'],[30,'NUISANCE'],[45,'MID'],[60,'FRIENDLY-ISH'],[75,'NEIGHBORHOOD HERO'],[90,'LITERAL ANGEL']];
@@ -2366,6 +2375,12 @@
       const dx=p.x-position.x,dz=p.z-position.z,d=Math.hypot(dx,dz);
       if(d>(a===rhino?5.5:4.5) || Math.abs(p.y-position.y)>4 || (d>.6 && (dx*flat.x+dz*flat.z)/d<.4) || elapsed-(boss.lastSlap||-9)<.55)continue;
       boss.lastSlap=elapsed;
+      if(a.kind==='electro' && a.state!=='subdued') {
+        // Electro's static field zaps bare-handed hits until a web stun shorts it out.
+        hitPlayer(position.clone().sub(p),14,6,true,12);damageBoss(a,.25,'SHOCKED SLAP',p.clone().setY(p.y+2.5));
+        if(elapsed-(boss.zapHint||-9)>4){boss.zapHint=elapsed;worldPopup('ZAP! STUN HIM WITH WEBS FIRST',p.clone().setY(p.y+3.6),'burst oops',2);}
+        hits++;continue;
+      }
       damageBoss(a,1,a.state==='subdued'?'BOSS SMACKDOWN':'BOSS SLAP',p.clone().setY(p.y+2.5));hits++;
       if(boss.status==='active' && a.state!=='subdued'){p.x+=flat.x*2;p.z+=flat.z*2;}
     }
@@ -2377,10 +2392,10 @@
   const beaconGeometry=new THREE.CylinderGeometry(2.2,2.2,300,12,1,true);
   const alertVerbs=['IS WRECKING','IS TERRORIZING','IS HAVING A NORMAL ONE IN','IS LOOSE IN','IS RUINING BRUNCH IN','IS DOING CRIMES IN'];
   const bosses=[
-    {actor:rhino,name:'RHINO',title:'Has never once paid for a fender bender',district:'CENTRAL PARK',color:0xff665f,hp:20,home:new THREE.Vector3(0,0,-29)},
-    {actor:villains.find(v=>v.kind==='electro'),name:'ELECTRO',title:'Stealing power from the Times Square billboards',district:'TIMES SQUARE',color:0x80eeff,hp:16},
-    {actor:villains.find(v=>v.kind==='goblin'),name:'GREEN GOBLIN',title:'Pumpkin-bombing Midtown commuters',district:'MIDTOWN',color:0xa8ff6c,hp:18},
-    {actor:villains.find(v=>v.kind==='octopus'),name:'DOC OCK',title:'Robbing Wall Street with four extra arms',district:'THE FINANCIAL DISTRICT',color:0xffc75e,hp:22}
+    {actor:rhino,name:'RHINO',title:'Has never once paid for a fender bender',district:'CENTRAL PARK',color:0xff665f,hp:48,home:new THREE.Vector3(0,0,-29)},
+    {actor:villains.find(v=>v.kind==='electro'),name:'ELECTRO',title:'Stealing power from the Times Square billboards',district:'TIMES SQUARE',color:0x80eeff,hp:38},
+    {actor:villains.find(v=>v.kind==='goblin'),name:'GREEN GOBLIN',title:'Pumpkin-bombing Midtown commuters',district:'MIDTOWN',color:0xa8ff6c,hp:42},
+    {actor:villains.find(v=>v.kind==='octopus'),name:'DOC OCK',title:'Robbing Wall Street with four extra arms',district:'THE FINANCIAL DISTRICT',color:0xffc75e,hp:52}
   ].map(def=>{
     const beacon=new THREE.Mesh(beaconGeometry,new THREE.MeshBasicMaterial({color:def.color,transparent:true,opacity:.2,depthWrite:false,blending:THREE.AdditiveBlending,fog:false}));
     beacon.visible=false;beacon.userData.projectile=true;beacon.raycast=()=>{};scene.add(beacon);
@@ -2413,14 +2428,19 @@
   function damageBoss(actor,amount,label,point=null) {
     const boss=actor?.boss;if(!boss || boss.status!=='active')return false;
     countHit();if(dodgeBoost>0)amount*=2;
-    const before=boss.hp,stunned=actor.state==='subdued';boss.hp=Math.max(0,boss.hp-amount*(stunned?1.5:1));focusBoss=boss;boss.lastHit=elapsed;
+    if(actor===rhino && actor.state!=='subdued' && !/MISSILE|FINISHER|POUND/.test(label||'')) {
+      // Rhino's front plates shrug off most hits: get behind him or make him crash.
+      const facing=new THREE.Vector3(-Math.sin(actor.group.rotation.y),0,-Math.cos(actor.group.rotation.y)),toPlayer=position.clone().sub(actor.group.position).setY(0).normalize();
+      if(facing.dot(toPlayer)>.2){amount*=.3;if(elapsed-(boss.armorHint||-9)>4){boss.armorHint=elapsed;worldPopup('ARMORED! HIT HIM FROM BEHIND OR MAKE HIM CRASH',actor.group.position.clone().setY(5),'burst oops',2);}}
+    }
+    const before=boss.hp,stunned=actor.state==='subdued';boss.hp=Math.max(0,boss.hp-amount*(stunned?1.25:1));focusBoss=boss;boss.lastHit=elapsed;
     const where=point||actor.group.position.clone().setY(actor.group.position.y+3);
     if(label)awardChaos(Math.round(amount*(stunned?240:120)),label,where,'trick');
     burst(where,12,[boss.color,0xffffff],{speed:7,life:.45,size:.35});
     if(boss.hp<=0){defeatBoss(boss);return true;}
     const third=boss.maxHp/3;
     if(!stunned && Math.ceil(boss.hp/third)<Math.ceil(before/third)) {
-      actor.state='subdued';actor.stuck=true;actor.webRemaining=3;actor.timer=0;worldPopup('STUNNED! SLAP THEM!',where,'burst trick',1.6);playEffect('impact');
+      actor.state='subdued';actor.stuck=true;actor.webRemaining=2.2;actor.timer=0;worldPopup('STUNNED! SLAP THEM!',where,'burst trick',1.6);playEffect('impact');
     }
     if(!actor.enraged && boss.hp<=boss.maxHp/2){actor.enraged=true;worldPopup(`${boss.name} IS ENRAGED`,where.clone().setY(where.y+1.5),'burst oops',1.8);}
     return true;
@@ -2468,6 +2488,21 @@
       const distance=Math.hypot(position.x-p.x,position.z-p.z);
       boss.beacon.visible=distance>45;boss.beacon.position.set(p.x,150,p.z);boss.beacon.material.opacity=.14+.08*Math.sin(elapsed*4);
       if(distance<nearestDistance){nearest=boss;nearestDistance=distance;}
+      if(distance>160 && boss.hp<boss.maxHp)boss.hp=Math.min(boss.maxHp,boss.hp+boss.maxHp*.03*dt);
+      if(a.kind==='octopus' && a.state!=='subdued' && distance>10 && distance<70) {
+        boss.carTimer=(boss.carTimer??4)-dt*(a.enraged?1.6:1);
+        if(boss.carTimer<=0) {
+          // Doc Ock hurls the nearest car in a high arc at you.
+          boss.carTimer=5.5;
+          const car=cars.filter(c=>c.group.visible && !c.knockback && !c.stuck && !c.webPinned && !c.webHeld && c.group.position.distanceTo(p)<35).sort((m,n)=>m.group.position.distanceToSquared(p)-n.group.position.distanceToSquared(p))[0];
+          if(car) {
+            const time=1.5,start=car.group.position,target=position.clone().addScaledVector(velocity,time*.6);
+            const launch=new THREE.Vector3((target.x-start.x)/time,(target.y+1-start.y)/time+.5*22*time,(target.z-start.z)/time);
+            throwActor(car,null,false,launch);
+            if(car.knockback){car.knockback.fromPlayer=false;car.knockback.bossThrow=true;worldPopup('INCOMING CAR!',p.clone().setY(p.y+4),'burst oops',1.4);playEffect('enemy',p);}
+          }
+        }
+      }
       // Left alone, a villain wrecks its neighborhood.
       boss.rampage-=dt;
       if(boss.rampage<=0 && distance>60) {
@@ -3319,6 +3354,7 @@
       nuke.smokeTexture?.dispose();
       nuke=null;
     }
+    endNukePanic();
     if(nukeRubble){nukeRubble.removeFromParent();nukeRubble.dispose();nukeRubble=null;}
     blastFlash.style.opacity='0';blastWind.style.opacity='0';blastBlackout.style.opacity='0';blackout=0;blackoutMode='';nukeButton.disabled=false;
   }
@@ -3536,7 +3572,7 @@
       const actor=owner.userData.actor,wasWebbed=actor.stuck;if(actor.dead)return;mark=wrapActor(owner,actor);mark.userData.webActor=actor;
       if(actor===rhino || villains.includes(actor)) {
         if(actor===rhino)mark.scale.set(2.6,2.2,2.5);else mark.scale.set(1.35,1.4,1.4);
-        damageBoss(actor,1,'WEB SHOT',hit.point);
+        damageBoss(actor,.5,'WEB SHOT',hit.point);
         if(actor.boss?.status==='active' && actor.state!=='subdued' && actor.state!=='charge' && actor.state!=='windup' && actor.state!=='dive'){actor.state='stagger';actor.timer=.25;}
       }
       else if(pedestrians.includes(actor)) {if(!wasWebbed){awardChaos(80,'GIFT WRAPPED',hit.point);say(actor,'webbed',.6);}actor.stuck=true;cancelVisit(actor);cancelDonation(actor);actor.webRemaining=15;}
@@ -3584,8 +3620,15 @@
     }
     return false;
   }
+  let playerNearActors=[];
+  function gatherPlayerNearActors() {
+    playerNearActors=[];
+    for(const list of [cars,pedestrians])for(const actor of list) {
+      const p=actor.group.position;if(Math.abs(p.x-position.x)<30 && Math.abs(p.z-position.z)<30)playerNearActors.push(actor);
+    }
+  }
   function resolvePlayerActors() {
-    for(const actor of [...cars,...pedestrians]) {
+    for(const actor of playerNearActors) {
       const p=actor.group.position;
       const base=actorFloor(actor),top=base+actor.top;
       if(actor.dead || !actor.group.visible || !overlaps(position.x,position.z,.38,.38,actor) || position.y>=top || position.y+1.8<=base) continue;
@@ -3816,7 +3859,7 @@
     } else if(obstacle===Infinity && car.laneCooldown===0 && Math.abs(car.laneTarget-car.preferredLane)>.1 && laneClear(car,car.preferredLane,actors)) {
       car.laneTarget=car.preferredLane;car.laneCooldown=3;
     }
-    const targetSpeed=obstacle===Infinity?car.speed:Math.min(car.speed,Math.max(0,obstacle*1.5));
+    const panic=nuke && nuke.phase!=='blast'?2.4:1,targetSpeed=obstacle===Infinity?car.speed*panic:Math.min(car.speed*panic,Math.max(0,obstacle*1.5));
     const acceleration=targetSpeed<car.currentSpeed?10:3;
     car.currentSpeed+=THREE.MathUtils.clamp(targetSpeed-car.currentSpeed,-acceleration*dt,acceleration*dt);
     p.x+=THREE.MathUtils.clamp(car.laneTarget-p.x,-2.8*dt,2.8*dt);
@@ -3918,6 +3961,7 @@
     }
     flight.time+=dt;flight.velocity.y-=(flight.rescue?4:22)*gravityScale*dt;p.addScaledVector(flight.velocity,dt);
     const flightSpeed=Math.hypot(flight.velocity.x,flight.velocity.z);
+    if(flight.bossThrow && !flight.hitPlayer && p.distanceTo(position)<3.4){flight.hitPlayer=true;hitPlayer(flight.velocity.clone(),26,10,false,24);impactFeedback(3);}
     if(flight.fromPlayer && !flight.hitBoss && flightSpeed>9) {
       // Anything you throw at a villain counts as an attack.
       for(const boss of bosses) {
@@ -4067,7 +4111,7 @@
         rhino.direction.set(target.x-p.x,0,target.z-p.z).normalize();
         if(rhino.direction.lengthSq()===0)rhino.direction.set(0,0,1);
         rhino.group.rotation.y=Math.atan2(-rhino.direction.x,-rhino.direction.z);
-        playEffect('alert',rhino.group.position);rhino.state='windup';rhino.timer=1.15;
+        playEffect('alert',rhino.group.position);rhino.state='windup';rhino.timer=.9;
       }
       return;
     }
@@ -4079,9 +4123,14 @@
     if(rhino.state==='charge') {
       const old=p.clone();p.addScaledVector(rhino.direction,(rhino.enraged?40:30)*dt);
       let obstruction=buildings.find(b=>insideBuilding(p.x,p.z,b,1.1));
-      if(obstruction?.parts){damageBuilding(obstruction,5);obstruction=null;}
+      if(obstruction) {
+        // Charging headfirst into a building leaves Rhino dazed and open.
+        if(obstruction.parts)damageBuilding(obstruction,5);
+        p.copy(old);rhino.state='subdued';rhino.stuck=true;rhino.webRemaining=3.2;rhino.timer=0;obstruction=null;
+        impactFeedback(3);playEffect('collapse',p);worldPopup('RHINO IS DAZED! GO!',p.clone().setY(5),'burst trick',1.6);
+      }
       const blocked=p.x<worldMinX||p.x>worldMaxX||p.z<worldMinZ||p.z>worldMaxZ||Boolean(waterAt(p.x,p.z))||Boolean(obstruction);
-      if(blocked){p.copy(old);rhino.state='recover';rhino.timer=2;}
+      if(blocked && rhino.state==='charge'){p.copy(old);rhino.state='recover';rhino.timer=1.4;}
       const stride=Math.sin(elapsed*17);
       rhino.body.rotation.x=.38;rhino.arms[0].rotation.x=stride*.5-.5;rhino.arms[1].rotation.x=-stride*.5-.5;
       rhino.legs[0].rotation.x=-stride*.6;rhino.legs[1].rotation.x=stride*.6;
@@ -4116,7 +4165,7 @@
     playEffect(electric?'electric':'impact',point);recentDanger={position:point.clone(),time:5};
     enemyFlash(point,radius,electric);
     const playerCenter=position.clone().add(new THREE.Vector3(0,1,0));
-    if(playerCenter.distanceTo(point)<radius+1)hitPlayer(playerCenter.clone().sub(point),electric?12:24,electric?7:13,electric);
+    if(playerCenter.distanceTo(point)<radius+1)hitPlayer(playerCenter.clone().sub(point),electric?12:24,electric?7:13,electric,electric?15:20);
     if(!electric) {
       for(const actor of actors) {
         if(!actor.group.visible||actor.rooftop||actor.knockback||actor.webHeld||actor.webPinned)continue;
@@ -4129,10 +4178,10 @@
       if(nearby)damageBuilding(nearby,1);
     }
   }
-  function fireEnemyShot(villain) {
+  function fireEnemyShot(villain,spread=0) {
     const electric=villain.kind==='electro',origin=villain.group.position.clone().add(new THREE.Vector3(0,electric?1.5:.3,0));
     playEffect(electric?'electric':'enemy',origin);
-    const target=position.clone().add(new THREE.Vector3(0,1,0)),direction=target.sub(origin).normalize();
+    const target=position.clone().add(new THREE.Vector3(0,1,0)),direction=target.sub(origin).normalize().applyAxisAngle(new THREE.Vector3(0,1,0),spread);
     const mesh=new THREE.Mesh(villainShotGeometry,electric?electroShotMaterial:goblinBombMaterial);
     const size=electric?.24:.38;mesh.scale.setScalar(size);mesh.position.copy(origin);mesh.userData.projectile=true;scene.add(mesh);
     const velocity=direction.multiplyScalar(electric?32:27);if(!electric)velocity.y+=3;
@@ -4184,7 +4233,7 @@
           p.x=oldPosition.x;p.z=oldPosition.z;p.y=Math.max(p.y,oldPosition.y+8*dt);
         }
         if(diving && (p.distanceTo(desired)<3 || villain.timer===0)) {
-          if(p.distanceTo(desired)<3)hitPlayer(position.clone().sub(p),30,14);
+          if(p.distanceTo(desired)<3)hitPlayer(position.clone().sub(p),30,14,false,26);
           enemyFlash(p,4);villain.state='cooldown';villain.timer=3.5;
         }
       } else {
@@ -4236,14 +4285,14 @@
       if(villain.glow)villain.glow.scale.set(.09,.12*(villain.state==='windup'?1.5:1),.02);
       if(villain.state==='windup' && villain.timer===0) {
         if(villain.kind==='octopus') {
-          const center=p.clone().add(new THREE.Vector3(0,1,0));enemyFlash(center,7);
-          if(distance<8 && Math.abs(position.y-p.y)<5)hitPlayer(new THREE.Vector3(dx,0,dz),28,12);
-          for(const actor of actors)if(actor.group.visible&&!actor.rooftop&&Math.hypot(actor.group.position.x-p.x,actor.group.position.z-p.z)<7) {
+          const center=p.clone().add(new THREE.Vector3(0,1,0));enemyFlash(center,9);
+          if(distance<10 && Math.abs(position.y-p.y)<5)hitPlayer(new THREE.Vector3(dx,0,dz),30,12,false,24);
+          for(const actor of actors)if(actor.group.visible&&!actor.rooftop&&Math.hypot(actor.group.position.x-p.x,actor.group.position.z-p.z)<9) {
             const direction=actor.group.position.clone().sub(p);direction.y=0;if(direction.lengthSq()<.01)direction.set(0,0,1);throwActor(actor,direction.normalize());
           }
         } else if(villain.kind==='goblin' && (++villain.attacks%2===0)) {villain.state='dive';villain.timer=2.5;}
-        else fireEnemyShot(villain);
-        if(villain.state!=='dive'){villain.state='cooldown';villain.timer=villain.kind==='goblin'?3.5:2.8;}
+        else {fireEnemyShot(villain);if(villain.enraged){fireEnemyShot(villain,.18);fireEnemyShot(villain,-.18);}}
+        if(villain.state!=='dive'){villain.state='cooldown';villain.timer=villain.kind==='goblin'?2.2:1.8;}
       } else if((villain.state==='stagger'||villain.state==='cooldown')&&villain.timer===0)villain.state='idle';
       if(villain.state==='idle') {
         const vertical=Math.abs(position.y-p.y),range=villain.kind==='octopus'?8:villain.kind==='electro'?55:75;
@@ -4254,19 +4303,21 @@
   }
   // Moving actors only need to check nearby cells for traffic and collisions.
   // Rebuild after traffic moves so pedestrians see cars that have wrapped routes.
-  function actorGrid(actors) {
-    const cells=new Map();
+  // Numeric cell keys avoid building strings for every actor every frame.
+  const cellKey=(x,z)=>(x+2048)*4096+(z+2048);
+  function actorGrid(actors,size=40) {
+    const cells=new Map();cells.cellSize=size;
     for(const actor of actors) {
-      const p=actor.group.position,key=`${Math.floor(p.x/40)},${Math.floor(p.z/40)}`;
-      if(!cells.has(key))cells.set(key,[]);
-      cells.get(key).push(actor);
+      const p=actor.group.position,key=cellKey(Math.floor(p.x/size),Math.floor(p.z/size));
+      let cell=cells.get(key);if(!cell){cell=[];cells.set(key,cell);}
+      cell.push(actor);
     }
     return cells;
   }
   function nearbyActors(grid,actor) {
-    const p=actor.group.position,x=Math.floor(p.x/40),z=Math.floor(p.z/40),near=[];
+    const size=grid.cellSize,p=actor.group.position,x=Math.floor(p.x/size),z=Math.floor(p.z/size),near=[];
     for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++) {
-      const cell=grid.get(`${x+dx},${z+dz}`);if(cell)near.push(...cell);
+      const cell=grid.get(cellKey(x+dx,z+dz));if(cell)for(const other of cell)near.push(other);
     }
     return near;
   }
@@ -4304,6 +4355,41 @@
     }
     p.x=oldX;p.z=oldZ;return true;
   }
+  let pedestrianFrame=0;
+  // When a nuke is called, every pedestrian drops everything and sprints away from ground zero.
+  const fleeTurns=[0,.6,-.6,1.2,-1.2,1.9,-1.9];
+  function nukeFlee(npc,dt) {
+    if(npc.rooftop || npc.dead || !npc.group.visible)return false;
+    const p=npc.group.position,away=Math.atan2(p.x-nuke.target.x,p.z-nuke.target.z);
+    if(!npc.nukePanic) {
+      npc.nukePanic=true;cancelVisit(npc);cancelDonation(npc);npc.pause=0;npc.crimeVictim=false;npc.panicSpeed=3.2+Math.random()*1.6;
+      if(npc.wheelchair)restoreWheelchair(npc);
+      for(const leg of [npc.leftLeg,npc.rightLeg])if(leg.userData.knee)leg.userData.knee.rotation.x=0;
+    }
+    const step=npc.panicSpeed*(npc.wheelchair?.6:1)*dt,oldX=p.x,oldZ=p.z;
+    let moved=false;
+    for(const turn of fleeTurns) {
+      const angle=away+turn;p.x=THREE.MathUtils.clamp(oldX+Math.sin(angle)*step,worldMinX+1,worldMaxX-1);p.z=THREE.MathUtils.clamp(oldZ+Math.cos(angle)*step,worldMinZ+1,worldMaxZ-1);
+      const local=buildingCells.get(`${Math.floor(p.x/40)},${Math.floor(p.z/40)}`)||[];
+      if(waterAt(p.x,p.z) || local.some(b=>insideBuilding(p.x,p.z,b,Math.max(npc.hx,npc.hz)) && !insideBuilding(oldX,oldZ,b,Math.max(npc.hx,npc.hz)))){p.x=oldX;p.z=oldZ;continue;}
+      npc.group.rotation.y=angle+Math.PI;moved=true;break;
+    }
+    p.y=inPark(p.x,p.z)?.1+parkElevation(p.x,p.z):.45;
+    npc.step+=step*12;const stride=moved?Math.sin(npc.step)*.9:0;
+    if(npc.wheelchair){for(const wheel of npc.wheelchair.wheels)wheel.rotateZ(step*2.5);}
+    else {npc.leftLeg.rotation.x=stride;npc.rightLeg.rotation.x=-stride;}
+    // Arms up, flailing.
+    npc.leftArm.rotation.x=-2.6+Math.sin(npc.step*1.3)*.5;npc.rightArm.rotation.x=-2.6-Math.sin(npc.step*1.3)*.5;
+    if(Math.random()<dt*.12){say(npc,'panic');if(Math.random()<.3)playVoice(p,'scream');}
+    return true;
+  }
+  function endNukePanic() {
+    for(const npc of pedestrians) {
+      if(!npc.nukePanic)continue;
+      npc.nukePanic=false;npc.leftArm.rotation.x=npc.rightArm.rotation.x=npc.leftLeg.rotation.x=npc.rightLeg.rotation.x=0;
+      if(npc.settled){seatedRest(npc);if(npc.rooftopKind==='view')rooftopRest(npc);}else if(npc.wheelchair)restoreWheelchair(npc);else nearestRouteCorner(npc);
+    }
+  }
   function updateWorld(dt) {
     updateRubble(dt);
     for(const building of destructibleBuildings)if(building.destroyed && building.washers)for(const washer of building.washers)updateWasher(washer,dt);
@@ -4316,7 +4402,7 @@
     let grid=actorGrid(actors);
     for(const car of cars) {
       if(nuke?.hitActors.has(car))continue;
-      const p=car.group.position,oldCell=`${Math.floor(p.x/40)},${Math.floor(p.z/40)}`;
+      const p=car.group.position,oldCell=cellKey(Math.floor(p.x/40),Math.floor(p.z/40));
       if(car.beacon) {
         const responding=threats.some(t=>Math.hypot(t.x-p.x,t.z-p.z)<95);
         car.speed=car.normalSpeed*(responding?1.35:1);car.beacon.visible=responding && Math.floor(elapsed*5)%2===0;
@@ -4328,15 +4414,22 @@
         if(wet && p.y<wet.surface+.7){p.y+=(wet.floor-p.y)*(1-Math.exp(-5*dt));car.currentSpeed*=Math.exp(-2*dt);car.wading=true;}
         else if(car.wading && !wet){p.y+=(0-p.y)*(1-Math.exp(-8*dt));if(p.y>-.02){p.y=0;car.wading=false;}}
       }
-      const newCell=`${Math.floor(p.x/40)},${Math.floor(p.z/40)}`;
+      const newCell=cellKey(Math.floor(p.x/40),Math.floor(p.z/40));
       if(oldCell!==newCell) {
         const old=grid.get(oldCell),index=old.indexOf(car);if(index>=0)old.splice(index,1);
         if(!grid.has(newCell))grid.set(newCell,[]);grid.get(newCell).push(car);
       }
     }
-    grid=actorGrid(actors);
+    grid=actorGrid(actors,20);
+    const frameDt=dt;pedestrianFrame++;
     for(const npc of pedestrians) {
+      let dt=frameDt;
       if(nuke?.hitActors.has(npc))continue;
+      if(!nuke && !npc.knockback && !npc.webHeld && !npc.webPinned && !npc.thug && rescue?.actor!==npc) {
+        // Far-away walkers are simulated every fourth frame with the time they missed.
+        const fx=npc.group.position.x-position.x,fz=npc.group.position.z-position.z;
+        const far=fx*fx+fz*fz;if(far>80*80){const every=far>120*120?4:2;npc.simDt=(npc.simDt||0)+frameDt;npc.simSlot??=Math.floor(Math.random()*4);if((pedestrianFrame+npc.simSlot)%every)continue;dt=npc.simDt;npc.simDt=0;}
+      }
       if(npc.dead) {
         // Cartoon rules: the flattened get back up eventually.
         if(npc.reviveAt && elapsed>npc.reviveAt && !nuke && !npc.thug){npc.dead=false;npc.reviveAt=0;npc.knockback={ground:npc.group.position.y};recoverKnockback(npc);say(npc,'revive');}
@@ -4344,6 +4437,7 @@
       }
       if(npc.webHeld || updateWebPin(npc,dt))continue;
       if(updateKnockback(npc,dt))continue;
+      if(nuke && nuke.phase!=='blast' && (!npc.thug || npc.crime) && nukeFlee(npc,dt))continue;
       if(npc.thug){updateThug(npc,dt);continue;}
       if(npc.crimeVictim)continue;
       if(updateWebbedPedestrian(npc,dt))continue;
@@ -4459,7 +4553,7 @@
     updateChaos(dt);updateParticles(dt);updateBosses(dt);updateActivities(dt);updateHero(dt);slapCooldown=Math.max(0,slapCooldown-dt);slapAnimation=Math.max(0,slapAnimation-dt);screenShake=Math.max(0,screenShake-dt*2.5);updateMutators(dt);
     if(input.lengthSq())input.normalize();
     // Solve the swing in small steps so arcs and reeling stay stable at different frame rates.
-    const steps=Math.max(1,Math.ceil(dt/(1/120))),step=dt/steps;
+    const steps=Math.max(1,Math.ceil(dt/(1/120))),step=dt/steps;gatherPlayerNearActors();
     for(let i=0;i<steps;i++) {
       previous.copy(position);
       if(nuke?.phase==='blast' && nuke.playerHit) {
@@ -4865,16 +4959,22 @@
   batchBuildingDetails();
   // Keep distant actors interactive while rendering a low-cost silhouette.
   // Their existing child pivots remain intact inside an identity transform.
+  const hiddenDetailMatrix=new THREE.Matrix4().makeTranslation(0,-10000,0);
   const actorDetailGeometry=new THREE.CylinderGeometry(.32,.38,1,6),vehicleDetailGeometry=new THREE.BoxGeometry(1,1,1);
-  const personDetailMaterial=new THREE.MeshLambertMaterial({color:0x646b70});
-  const carDetailMaterial=new THREE.MeshLambertMaterial({color:0x697077}),taxiDetailMaterial=new THREE.MeshLambertMaterial({color:0xd5a536});
   const detailActors=[...cars,...pedestrians];
+  // Far actors are drawn as one instanced stand-in per kind, tinted to match.
+  const personProxies=new THREE.InstancedMesh(actorDetailGeometry,new THREE.MeshLambertMaterial({color:0xffffff}),pedestrians.length);
+  const carProxies=new THREE.InstancedMesh(vehicleDetailGeometry,new THREE.MeshLambertMaterial({color:0xffffff}),cars.length);
+  const proxyLocal=new THREE.Matrix4(),proxyWorld=new THREE.Matrix4(),proxyColor=new THREE.Color();
+  for(const batch of [personProxies,carProxies]){batch.frustumCulled=false;batch.raycast=()=>{};batch.userData.projectile=true;batch.castShadow=false;scene.add(batch);}
   for(const actor of detailActors) {
     const root=new THREE.Group();while(actor.group.children.length)root.add(actor.group.children[0]);actor.group.add(root);actor.visualRoot=root;
-    const car=cars.includes(actor),proxy=new THREE.Mesh(car?vehicleDetailGeometry:actorDetailGeometry,car?(actor.modelKind==='taxi'?taxiDetailMaterial:carDetailMaterial):personDetailMaterial);
-    proxy.scale.set(car?actor.hx*2:1,actor.top*.85,car?actor.hz*2:1);proxy.position.y=actor.top*.43;proxy.visible=false;proxy.raycast=()=>{};
-    actor.group.add(proxy);actor.detailProxy=proxy;
+    const car=cars.includes(actor),batch=car?carProxies:personProxies,index=car?cars.indexOf(actor):pedestrians.indexOf(actor);
+    actor.proxyBatch=batch;actor.proxyIndex=index;actor.proxyLocal=new THREE.Matrix4().compose(new THREE.Vector3(0,actor.top*.43,0),new THREE.Quaternion(),new THREE.Vector3(car?actor.hx*2:1,actor.top*.85,car?actor.hz*2:1));
+    batch.setColorAt(index,car?proxyColor.setHex(actor.modelKind==='taxi'?0xd5a536:0x697077):proxyColor.copy(actor.proxyColor||new THREE.Color(0x646b70)).lerp(new THREE.Color(0x8a8f94),.25));
+    batch.setMatrixAt(index,hiddenDetailMatrix);
   }
+  personProxies.instanceColor.needsUpdate=carProxies.instanceColor.needsUpdate=true;
   const detailTrees=scene.children.filter(object=>object.userData.treeType).map(group=>{
     const trunk=group.children.find(child=>child.isMesh && child.geometry.type==='CylinderGeometry');
     const height=trunk?.geometry.parameters.height||5;
@@ -4884,12 +4984,21 @@
   const distantCanopies=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),parkLeaves[1],detailTrees.length);
   for(const batch of [distantTrunks,distantCanopies]){batch.frustumCulled=false;batch.userData.projectile=true;batch.raycast=()=>{};scene.add(batch);}
   const detailTransform=new THREE.Object3D(),detailMatrix=new THREE.Matrix4(),hiddenDetail=new THREE.Matrix4().makeTranslation(0,-10000,0);
-  function updateSceneDetail() {
+  let sceneDetailFrame=0;
+  function updateSceneDetail(force=false) {
+    // Far stand-ins barely move on screen, so refresh them every third frame.
+    if(!force && sceneDetailFrame++%3)return;
     for(const actor of detailActors) {
       const p=actor.group.position,dx=p.x-position.x,dz=p.z-position.z,dy=(p.y-position.y)*.5;
-      const detailed=dx*dx+dz*dz+dy*dy<100*100 || actor.webHeld || actor.webPinned || actor.knockback || rescue?.actor===actor;
-      actor.visualRoot.visible=detailed;actor.detailProxy.visible=!detailed;
+      const detailed=dx*dx+dz*dz+dy*dy<(cars.includes(actor)?100:75)**2 || actor.webHeld || actor.webPinned || actor.knockback || rescue?.actor===actor;
+      if(detailed!==actor.detailShown) {
+        // Detach far bodies entirely so the scene graph skips their limbs each frame.
+        actor.detailShown=detailed;if(detailed)actor.group.add(actor.visualRoot);else actor.visualRoot.removeFromParent();
+      }
+      if(!detailed && actor.group.visible){actor.group.updateMatrix();proxyWorld.multiplyMatrices(actor.group.matrix,actor.proxyLocal);actor.proxyBatch.setMatrixAt(actor.proxyIndex,proxyWorld);}
+      else actor.proxyBatch.setMatrixAt(actor.proxyIndex,hiddenDetailMatrix);
     }
+    personProxies.instanceMatrix.needsUpdate=carProxies.instanceMatrix.needsUpdate=true;
     detailTrees.forEach((tree,index)=>{
       const p=tree.group.position,dx=p.x-position.x,dz=p.z-position.z;
       const distanceSq=dx*dx+dz*dz;tree.root.visible=distanceSq<90*90;
@@ -5104,6 +5213,6 @@
   if(new URLSearchParams(location.search).has("debug"))window.__spida={renderer,scene,grappleMeshes,buildings,position,velocity,keys,pedestrians,cars,mutators,beginWebAction,endWebAction,jump,spiderSlap,setMutator,
     look:(y,p)=>{yaw=y;pitch=p;},tick:(seconds,dt=1/60)=>{for(let t=0;t<seconds;t+=dt)update(dt);renderer.shadowMap.needsUpdate=true;renderer.clear();renderer.render(scene,camera);renderer.clearDepth();renderer.render(handsScene,handsCamera);drawMinimap(1);},state:()=>({rope:Boolean(rope),onGround,speed:velocity.length(),chaosScore,comboPoints,opinion,anchor:rope?.anchor})};
   applySuit(progress.suit);updateHeroHud();
-  reset();updateSceneDetail();updateCityLod(0,true);requestAnimationFrame(frame);
+  reset();updateSceneDetail(true);updateCityLod(0,true);requestAnimationFrame(frame);
 })();
 
