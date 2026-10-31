@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model Gallery</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe6ea; font-family: system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .bar { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .bar button { padding: 6px 10px; border: 1px solid #9aa7ae; border-radius: 6px; background: #fff; cursor: pointer; font: 600 13px system-ui; }
+    .bar button.on { background: #22303a; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="bar" id="bar"></div>
+  <canvas id="view"></canvas>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+  <script src="toy-models.js"></script>
+  <script>
+    // A turntable view of the generated model pack. Drag to rotate; buttons switch sets.
+    const canvas = document.getElementById('view');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe6ea);
+    const camera = new THREE.PerspectiveCamera(35, 1, .05, 100);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa38f, 1.6));
+    const sun = new THREE.DirectionalLight(0xfff1dd, 2.4); sun.position.set(3, 6, 4); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 }); scene.add(sun);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({ color: 0xc9d0c4, roughness: .95 }));
+    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+    const stage = new THREE.Group(); scene.add(stage);
+    const sets = {
+      'Crowd': () => { const styles = ['casual', 'suit', 'hoodie', 'worker', 'tourist', 'jogger', 'elder', 'dress', 'punk', 'doctor', 'chef', 'cop'];
+        styles.forEach((style, i) => { const p = ToyKit.person(40 + i * 13, { style }); p.mesh.position.set((i % 6 - 2.5) * .9, 0, Math.floor(i / 6) * -1.4); p.mesh.rotation.y = Math.PI; stage.add(p.mesh); });
+        return [0, 1.5, 4.6, 0, .9, -.6]; },
+      'Close-up': () => { for (let i = 0; i < 3; i++) { const p = ToyKit.person(7 + i * 31, { style: ['casual', 'suit', 'dress'][i] }); p.mesh.position.set((i - 1) * .7, 0, 0); p.mesh.rotation.y = Math.PI; stage.add(p.mesh); }
+        return [0, 1.55, 2.2, 0, 1.2, 0]; },
+      'Walking': () => { for (let i = 0; i < 5; i++) { const p = ToyKit.person(90 + i * 17); p.mesh.position.set((i - 2) * .9, 0, 0); p.mesh.rotation.y = Math.PI; p.walk = i; stage.add(p.mesh); walkers.push(p); }
+        return [0, 1.4, 4.2, 0, .9, 0]; },
+      'Props': () => { const items = [ToyKit.tree(3).mesh, ToyKit.tree(8, 'pine').mesh, ToyKit.hydrant(), ToyKit.bench(), ToyKit.trashCan()];
+        items.forEach((m, i) => { m.position.set((i - 2) * 2.4, 0, 0); stage.add(m); }); return [0, 3, 11, 0, 1.4, 0]; }
+    };
+    let walkers = [], target = [0, 1, 0];
+    function show(name) {
+      walkers = []; while (stage.children.length) stage.remove(stage.children[0]);
+      const [cx, cy, cz, tx, ty, tz] = sets[name](); camera.position.set(cx, cy, cz); target = [tx, ty, tz]; camera.lookAt(...target);
+      document.querySelectorAll('.bar button').forEach(b => b.classList.toggle('on', b.textContent === name));
+    }
+    const bar = document.getElementById('bar');
+    for (const name of Object.keys(sets)) { const b = document.createElement('button'); b.textContent = name; b.onclick = () => show(name); bar.appendChild(b); }
+    let spin = 0, dragging = false, lastX = 0;
+    canvas.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; });
+    addEventListener('pointerup', () => dragging = false);
+    addEventListener('pointermove', e => { if (dragging) { spin += (e.clientX - lastX) * .01; lastX = e.clientX; } });
+    function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+    addEventListener('resize', resize); resize(); show(new URLSearchParams(location.search).get('set') || 'Crowd');
+    renderer.setAnimationLoop(t => {
+      stage.rotation.y = spin;
+      for (const p of walkers) { const s = Math.sin(t / 1000 * 6 + p.walk) * .45; p.leftLeg.rotation.x = s; p.rightLeg.rotation.x = -s; p.leftArm.rotation.x = -s * .8; p.rightArm.rotation.x = s * .8; p.leftLeg.userData.knee.rotation.x = Math.max(0, -s) * .7; p.rightLeg.userData.knee.rotation.x = Math.max(0, s) * .7; }
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
