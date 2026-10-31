@@ -3741,7 +3741,9 @@
     if(npc.wheelchair)restoreWheelchair(npc);else npc.leftLeg.rotation.x=npc.rightLeg.rotation.x=0;
     npc.rightArm.rotation.x=-Math.min(1,donation.time*4)*1.05;
     if(donation.time>=.25 && !donation.coin) {donation.coin=new THREE.Mesh(coinGeo,goldMat);scene.add(donation.coin);}
-    if(donation.coin) {
+    // Far bodies are detached from the scene, so only animate the coin up close.
+    if(donation.coin)donation.coin.visible=Boolean(npc.visualRoot?.parent && shelter.visualRoot?.parent);
+    if(donation.coin?.visible) {
       npc.group.updateWorldMatrix(true,true);shelter.group.updateWorldMatrix(true,true);
       const from=npc.rightArm.localToWorld(new THREE.Vector3(0,-.51,0));
       const to=shelter.cup.localToWorld(new THREE.Vector3(0,.03,0));
@@ -3891,7 +3893,8 @@
         dog.mixer.update(dt);
       } else for(let i=0;i<dog.legs.length;i++)dog.legs[i].rotation.x=Math.sin(dog.phase+(i%3?Math.PI:0))*Math.min(.45,moved*12);
       owner.group.updateWorldMatrix(true,true);dog.group.updateWorldMatrix(true,true);
-      const from=owner.rightArm.localToWorld(new THREE.Vector3(0,-.43,0));
+      // A far owner's body is detached from the scene, so use their group for the hand.
+      const from=owner.visualRoot?.parent?owner.rightArm.localToWorld(new THREE.Vector3(0,-.43,0)):owner.group.localToWorld(new THREE.Vector3(.23,.85,0));
       const to=dog.group.localToWorld(new THREE.Vector3(0,.62,-.30));
       const coords=dog.leash.geometry.attributes.position;coords.setXYZ(0,from.x,from.y,from.z);coords.setXYZ(1,to.x,to.y,to.z);coords.needsUpdate=true;dog.leash.geometry.computeBoundingSphere();
     }
