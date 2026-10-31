@@ -51,6 +51,9 @@
   const random = n => { const v = Math.sin(n * 127.1 + 17.7) * 43758.5453; return v - Math.floor(v); };
   const parkWaters=[{x:-4,z:-169,rx:16,rz:11},{x:-20,z:-70,rx:32,rz:39,reservoir:true},{x:-32,z:65,rx:27,rz:21},{x:-8,z:34,rx:8,rz:5},{x:4,z:172,rx:13,rz:9}];
   function pondVariation(body,angle) {return body.reservoir?1:1+.10*Math.sin(3*angle+.4)+.045*Math.sin(5*angle-.6);}
+  // Manhattan runs north (-z) to south (+z) between the Hudson and the East
+  // River; Brooklyn sits across the river at the far end of the Brooklyn Bridge.
+  const bridgeZ=760,manhattanMinZ=-700,manhattanMaxZ=1000,brooklyn={minX:358,maxX:766,minZ:436,maxZ:1110},riverWater={surface:-.29,floor:-1.6};
   function waterAt(x,z) {
     // The bridge deck and islet remain walkable even though they cross the lake.
     if(x>=-63 && x<=-1 && Math.abs(z-65)<1.5)return null;
@@ -62,6 +65,10 @@
       if(Math.hypot(nx,nz)<pondVariation(body,angle))return {surface:.12,floor:-.85};
     }
     if(x>230 && Math.abs(z)<80 && !(z>18.5&&z<25.5) && !(z> -58&&z< -50))return {surface:.06,floor:-.95};
+    // The Hudson, East River and the harbor are deep enough to swim in.
+    if(x>262 && x<brooklyn.minX)return riverWater;
+    if(x>=brooklyn.minX && (z<brooklyn.minZ || z>brooklyn.maxZ || x>brooklyn.maxX))return riverWater;
+    if(x<=262 && (z>manhattanMaxZ || z<manhattanMinZ || x< -262))return riverWater;
     return null;
   }
   function addWaterHoles(shape,includeHarbor=false) {
@@ -73,23 +80,37 @@
       }
       shape.holes.push(hole);
     }
-    if(includeHarbor){const hole=new THREE.Path();hole.moveTo(230,80);hole.lineTo(279.99,80);hole.lineTo(279.99,-80);hole.lineTo(230,-80);hole.closePath();shape.holes.push(hole);}
+    if(includeHarbor){const hole=new THREE.Path();hole.moveTo(230,80);hole.lineTo(261.99,80);hole.lineTo(261.99,-80);hole.lineTo(230,-80);hole.closePath();shape.holes.push(hole);}
   }
   // A long island surrounded by water keeps the playable street at its original height.
-  const streetShape=new THREE.Shape();streetShape.moveTo(-280,-880);streetShape.lineTo(280,-880);streetShape.lineTo(280,280);streetShape.lineTo(-280,280);streetShape.closePath();addWaterHoles(streetShape,true);
+  const streetShape=new THREE.Shape();streetShape.moveTo(-262,-manhattanMaxZ);streetShape.lineTo(262,-manhattanMaxZ);streetShape.lineTo(262,-manhattanMinZ);streetShape.lineTo(-262,-manhattanMinZ);streetShape.closePath();addWaterHoles(streetShape,true);
   const street=new THREE.Mesh(new THREE.ShapeGeometry(streetShape),mats.road);street.rotation.x=-Math.PI/2;street.receiveShadow=true;scene.add(street);
-  const harborWater=new THREE.MeshStandardMaterial({color:0x476f80,roughness:.3,metalness:.22,transparent:true,opacity:.68,depthWrite:false});
+  // A tiling ripple normal map, scrolled every frame, makes the rivers glint like water.
+  const waterNormals=(()=>{
+    const size=256,image=document.createElement('canvas');image.width=image.height=size;const c=image.getContext('2d'),data=c.createImageData(size,size),heights=new Float32Array(size*size);
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++){const u=x/size*Math.PI*2,v=y/size*Math.PI*2;heights[y*size+x]=Math.sin(u*3+Math.sin(v*2)*1.5)+Math.sin(v*5+u*2)*.6+Math.sin((u+v)*7)*.25+Math.sin(u*11-v*4)*.15;}
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
+      const dx=heights[y*size+(x+1)%size]-heights[y*size+(x+size-1)%size],dy=heights[((y+1)%size)*size+x]-heights[((y+size-1)%size)*size+x];
+      const n=new THREE.Vector3(-dx*2,-dy*2,1).normalize(),i=(y*size+x)*4;
+      data.data[i]=(n.x*.5+.5)*255;data.data[i+1]=(n.y*.5+.5)*255;data.data[i+2]=(n.z*.5+.5)*255;data.data[i+3]=255;
+    }
+    c.putImageData(data,0,0);const texture=new THREE.CanvasTexture(image);texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.set(220,220);return texture;
+  })();
+  const harborWater=new THREE.MeshStandardMaterial({color:0x2f5d72,roughness:.18,metalness:.35,normalMap:waterNormals,normalScale:new THREE.Vector2(.55,.55),transparent:true,opacity:.92,depthWrite:false});
   const water=box(6000,.1,6000,harborWater,0,-.35,0);water.receiveShadow=true;
   const wadeRipple=new THREE.Mesh(new THREE.RingGeometry(.7,.78,32),new THREE.MeshBasicMaterial({color:0xe2f2e7,transparent:true,opacity:.45,side:THREE.DoubleSide,depthWrite:false}));
   wadeRipple.rotation.x=-Math.PI/2;wadeRipple.visible=false;wadeRipple.userData.projectile=true;scene.add(wadeRipple);
-  const islandShape=new THREE.Shape();
-  for(const [i,p] of [[-280,1180],[280,1180],[280,-880],[175,-950],[0,-1010],[-175,-950],[-280,-880]].entries()) {
-    if(i===0)islandShape.moveTo(p[0],p[1]);else islandShape.lineTo(p[0],p[1]);
+  // Brooklyn's streets, then stone seawalls and the far shores of the other boroughs.
+  const brooklynStreets=box(brooklyn.maxX-brooklyn.minX,.1,brooklyn.maxZ-brooklyn.minZ,mats.road,(brooklyn.minX+brooklyn.maxX)/2,-.05,(brooklyn.minZ+brooklyn.maxZ)/2);brooklynStreets.receiveShadow=true;
+  const seawall=material(0x7d786e),farShore=material(0x5d6461);
+  for(const [x0,x1,z0,z1] of [[-266,266,manhattanMinZ-4,manhattanMaxZ+4],[brooklyn.minX-4,brooklyn.maxX+4,brooklyn.minZ-4,brooklyn.maxZ+4]]) {
+    // A ring of stone edges each shore, leaving park ponds open to the water below.
+    box(x1-x0,1.2,5,seawall,(x0+x1)/2,-.62,z0+2.5);box(x1-x0,1.2,5,seawall,(x0+x1)/2,-.62,z1-2.5);
+    box(5,1.2,z1-z0,seawall,x0+2.5,-.62,(z0+z1)/2);box(5,1.2,z1-z0,seawall,x1-2.5,-.62,(z0+z1)/2);
   }
-  islandShape.closePath();addWaterHoles(islandShape,true);const island=new THREE.Mesh(new THREE.ShapeGeometry(islandShape),mats.road);
-  island.rotation.x=-Math.PI/2;island.position.y=-.12;island.receiveShadow=true;scene.add(island);
+  for(const [x0,x1,z0,z1] of [[-1600,-430,-1600,1700],[430,1600,-1600,380],[brooklyn.maxX+4,1600,brooklyn.minZ-4,brooklyn.maxZ+4],[-420,420,-1600,-760]])box(x1-x0,.6,z1-z0,farShore,(x0+x1)/2,-.2,(z0+z1)/2).receiveShadow=true;
   const buildings = [], upperBuildingColliders = [], grappleMeshes = [], destructibleBuildings=[];
-  const suburbBounds={minX:-200,maxX:200,minZ:-480,maxZ:-240},worldMinZ=-478,worldMaxZ=838;
+  const worldMinX=-258,worldMaxX=762,worldMinZ=-698,worldMaxZ=1106;
   // Repeating facade tiles retain a consistent window size across short and tall buildings.
   function facadeMaterial(kind, tint) {
     const image=document.createElement('canvas'); image.width=256; image.height=512;
@@ -151,14 +172,13 @@
       const sidewalks=new THREE.InstancedMesh(geometry,mats.sidewalk,limit);
       const counts=buildingMats.map(()=>0),shapedCounts=[0,0,0], transform=new THREE.Object3D();let count=0,roofCount=0;
       for(let gx=sectorX;gx<sectorX+20;gx++) for(let gz=sectorZ;gz<sectorZ+20;gz++) {
-        if(gx>=-6&&gx<6&&gz>=-6&&gz<21)continue;
-        if(gx>=-5&&gx<5&&gz>=-12&&gz< -6)continue;
-        if(gx>=6 && gz>=-5 && gz<5)continue; // Keep the waterfront and harbor clear of skyline buildings.
+        // Only the far shores get skyline: New Jersey, Queens, the Bronx and outer Brooklyn.
         const x=gx*40+20,z=gz*40+20,seed=(gx+40)*31+(gz+40)*73;
-        const islandHalfWidth=z>280?Math.max(0,280-(z-280)*2.15):280;
-        if(Math.abs(x)>islandHalfWidth-15 || z< -1180 || z>400)continue;
+        const zone=x< -460?'jersey':x>460&&z<350?'queens':x>800&&z>=440&&z<1080?'brooklyn':z< -800&&Math.abs(x)<390?'bronx':null;
+        if(!zone || random(seed+5)>(zone==='jersey'?.75:.6))continue;
         const kind=Math.floor(random(seed+90)*buildingMats.length);
-        const height=22+random(seed)*70+(random(seed+8)>.82?30:0);
+        const skyline=(zone==='jersey'&&x>-760&&z>250&&z<850)||(zone==='queens'&&x<660&&z>-150);
+        const height=(zone==='jersey'?16+random(seed)*40:10+random(seed)*26)+(skyline&&random(seed+8)>.55?45+random(seed+9)*50:0);
         const width=19+random(seed+1)*7,depth=20+random(seed+2)*6;
         const shapeChance=random(seed+131),shape=shapeChance>.67?Math.min(2,Math.floor((shapeChance-.67)/.33*3)):-1;
         transform.position.set(x,height/2+.45,z);transform.scale.set(width,height,depth);transform.updateMatrix();
@@ -204,7 +224,7 @@
   const parkBounds={minX:-74.5,maxX:34.5,minZ:-194.5,maxZ:194.5};
   function inPark(x,z){return x>parkBounds.minX&&x<parkBounds.maxX&&z>parkBounds.minZ&&z<parkBounds.maxZ;}
   // Reserve a block for each plaza and a few eastern blocks for the waterfront.
-  function interestBlock(gx,gz){return (gx===1&&gz===5)||(gx===3&&gz===5)||(gx===5&&gz>=-5&&gz<=4);} 
+  function interestBlock(gx,gz){return (gx===1&&gz===5)||(gx===0&&gz===13)||(gx===5&&gz>=-5&&gz<=4);} 
   // Broadway cuts diagonally through the otherwise regular Manhattan grid.
   const curvedRoads = [
     [[-240,-120],[-205,-130],[-165,-151],[-125,-178],[-80,-200]],
@@ -303,6 +323,7 @@
     if(!b.shape)return dx<rx&&dz<rz;
     const nx=(x-b.x)/rx,nz=(z-b.z)/rz;
     if(b.shape==='round')return nx*nx+nz*nz<1;
+    if(b.shape==='triangle')return nz>-1 && Math.abs(nx)<(nz+1)/2;
     const sides=b.shape==='diamond'?4:8,limit=Math.cos(Math.PI/sides);
     for(let i=0;i<sides;i++) {
       const angle=(i+.5)*Math.PI*2/sides;
@@ -310,9 +331,11 @@
     }
     return true;
   }
+  // The wedge footprint points north (-z) and fills its bounding box like the other shapes.
+  const triangleTowerGeometry=(()=>{const geometry=new THREE.CylinderGeometry(1,1,1,3);geometry.rotateY(Math.PI);geometry.scale(1/Math.sin(Math.PI/3),1,4/3);geometry.translate(0,0,1/3);return geometry;})();
   const roundTowerGeometry=new THREE.CylinderGeometry(1,1,1,32),diamondTowerGeometry=new THREE.CylinderGeometry(1,1,1,4),octagonalTowerGeometry=new THREE.CylinderGeometry(1,1,1,8);
   function shapedBuilding(x,z,w,d,bottom,height,facade,shape) {
-    const geometry=shape==='round'?roundTowerGeometry:shape==='diamond'?diamondTowerGeometry:octagonalTowerGeometry;
+    const geometry=shape==='triangle'?triangleTowerGeometry:shape==='round'?roundTowerGeometry:shape==='diamond'?diamondTowerGeometry:octagonalTowerGeometry;
     const mesh=new THREE.Mesh(geometry,facade);mesh.position.set(x,bottom+height/2,z);mesh.scale.set(w/2,height,d/2);mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);return mesh;
   }
   function setback(x,z,w,d,bottom,height,facade) {
@@ -330,9 +353,35 @@
     destructibleBuildings.push(building);
   }
   // Landmarks use the same collision and grapple lists as the rest of the city.
-  const landmarkSites=[{kind:'empire-state',x:60,z:300},{kind:'twin-north',x:-180,z:700},{kind:'twin-south',x:-140,z:700}];
+  const landmarkSites=[{kind:'chrysler',x:140,z:260},{kind:'flatiron',x:20,z:460},{kind:'empire-state',x:60,z:300},{kind:'twin-north',x:-180,z:700},{kind:'twin-south',x:-140,z:700}];
   const landmarkStone=material(0xc6b9a5),landmarkMetal=material(0x9aa6a9);
+  const chrome=new THREE.MeshStandardMaterial({color:0xd5dadd,roughness:.18,metalness:.92}),sunburst=new THREE.MeshBasicMaterial({color:0xfff1c4});
+  function makeChrysler(x,z) {
+    box(29,.45,29,mats.sidewalk,x,.2,z);
+    const height=78,tower=facadeBox(22,height,22,buildingMats[3],x,height/2+.45,z);tower.castShadow=true;tower.receiveShadow=true;grappleMeshes.push(tower);
+    let top=height+.45;
+    for(const [w,h] of [[18,14],[14,10]])top=setback(x,z,w,w,top,h,buildingMats[3]);
+    for(const dx of [-1,1])for(const dz of [-1,1])box(1.8,.6,.6,chrome,x+dx*9.4,height-1,z+dz*9.4);
+    // Stacked chrome arches pierced by triangular windows form the crown.
+    for(let i=0;i<6;i++) {
+      const radius=6.5-i,tier=new THREE.Mesh(new THREE.CylinderGeometry(radius*.9,radius,3.6,4),chrome);
+      tier.rotation.y=Math.PI/4;tier.position.set(x,top+1.8+i*3.6,z);tier.castShadow=true;scene.add(tier);grappleMeshes.push(tier);
+      for(let face=0;face<4;face++){const a=face*Math.PI/2,window=new THREE.Mesh(new THREE.ConeGeometry(.5,1.5,3),sunburst);window.position.set(x+Math.sin(a)*radius*.66,top+1.8+i*3.6,z+Math.cos(a)*radius*.66);scene.add(window);}
+    }
+    upperBuildingColliders.push({x,z,w:12,d:12,bottom:top,height:top+21.6});
+    const spire=new THREE.Mesh(new THREE.ConeGeometry(.9,24,8),chrome);spire.position.set(x,top+21.6+12,z);spire.castShadow=true;scene.add(spire);grappleMeshes.push(spire);
+    buildings.push({x,z,w:22,d:22,height:height+.45,landmark:'chrysler'});
+  }
+  function makeFlatiron(x,z) {
+    box(29,.45,29,mats.sidewalk,x,.2,z);
+    const height=52,tower=shapedBuilding(x,z,22,28,.45,height,buildingMats[1],'triangle'),roof=shapedBuilding(x,z,22.8,28.8,height+.45,.8,stone,'triangle');
+    for(const y of [5.5,height-5])shapedBuilding(x,z,22.6,28.6,y,.5,stone,'triangle');
+    grappleMeshes.push(tower,roof);
+    buildings.push({x,z,w:22,d:28,height:height+1.25,shape:'triangle',landmark:'flatiron'});
+  }
   function makeLandmark(site) {
+    if(site.kind==='chrysler')return makeChrysler(site.x,site.z);
+    if(site.kind==='flatiron')return makeFlatiron(site.x,site.z);
     const {x,z,kind}=site,empire=kind==='empire-state';
     box(29,.45,29,mats.sidewalk,x,.2,z);
     const width=empire?25:22,height=empire?100:kind==='twin-north'?174:171;
@@ -421,13 +470,44 @@
   billboardTexture.colorSpace=THREE.SRGBColorSpace;
   billboardTexture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
   const billboardMat=new THREE.MeshBasicMaterial({map:billboardTexture});
-  for (let gx=-6; gx<6; gx++) for (let gz=-6; gz<21; gz++) {
+  function districtAt(x,z) {
+    if(x>300)return z<600&&x<600?'downtown-brooklyn':z<840&&x<540?'dumbo':'brooklyn';
+    return z< -240?'harlem':z<200?'uptown':z<460?'midtown':z<660?'village':'fidi';
+  }
+  const tankGeometry=new THREE.CylinderGeometry(1.5,1.5,2.8,12),tankRoofGeometry=new THREE.ConeGeometry(1.65,.9,12),tankWood=material(0x7a5f45);
+  // The wooden rooftop water tank is the most New York thing on any skyline.
+  function waterTower(x,y,z) {
+    for(const dx of [-.9,.9])for(const dz of [-.9,.9])box(.14,2.2,.14,metal,x+dx,y+1.1,z+dz);
+    const tank=new THREE.Mesh(tankGeometry,tankWood);tank.position.set(x,y+3.6,z);tank.castShadow=true;scene.add(tank);
+    const cap=new THREE.Mesh(tankRoofGeometry,mats.roof);cap.position.set(x,y+5.45,z);scene.add(cap);grappleMeshes.push(tank,cap);
+  }
+  // Two rows of walk-ups per block, with stoops facing each street.
+  function rowHouseBlock(x,z,seed,district) {
+    const pavement=box(29,.45,29,mats.sidewalk,x,.2,z);pavement.receiveShadow=true;
+    for(const side of [-1,1]) {
+      const bz=z+side*7.5,first=scene.children.length,upperStart=upperBuildingColliders.length;
+      const height=Math.floor((district==='harlem'?11:9)+random(seed+side*17)*(district==='harlem'?11:8));
+      const facade=buildingMats[random(seed+side*5)>.45?4:1];
+      const tower=facadeBox(27,height,11,facade,x,height/2+.45,bz);tower.castShadow=true;tower.receiveShadow=true;
+      const roof=box(27.6,.5,11.6,mats.roof,x,height+.7,bz);roof.castShadow=true;
+      box(27.9,.55,11.9,stone,x,height+.2,bz);
+      const front=bz+side*5.5;
+      for(const n of [-1.5,-.5,.5,1.5]) {
+        const doorX=x+n*6.4;box(1.2,2.3,.12,awning,doorX,1.6,front+side*.07);
+        for(let step=0;step<3;step++)box(1.8,.18,.4,stone,doorX,.48+step*.18,front+side*(1.05-step*.32));
+      }
+      if(random(seed+side*41)>.5)waterTower(x+side*6-3,height+.95,bz);
+      const building={x,z:bz,w:27,d:11,height:height+.95,rowHouse:true};buildings.push(building);grappleMeshes.push(tower,roof);
+      registerDestructible(building,scene.children.slice(first),upperStart);
+    }
+  }
+  function cityBlock(gx,gz) {
     const x=gx*40+20, z=gz*40+20, seed=(gx+9)*31+(gz+9)*73;
-    if((gx>=-2&&gx<=0&&gz>=-5&&gz<=4)||interestBlock(gx,gz))continue;
+    if((gx>=-2&&gx<=0&&gz>=-5&&gz<=4)||interestBlock(gx,gz))return;
     const community=communitySites.find(site=>site.x===x&&site.z===z);
-    if(community){const first=scene.children.length,upperStart=upperBuildingColliders.length;makeCommunityBuilding(community);registerDestructible(buildings[buildings.length-1],scene.children.slice(first+1),upperStart);continue;}
+    if(community){const first=scene.children.length,upperStart=upperBuildingColliders.length;makeCommunityBuilding(community);registerDestructible(buildings[buildings.length-1],scene.children.slice(first+1),upperStart);return;}
     const landmark=landmarkSites.find(site=>site.x===x&&site.z===z);
-    if(landmark){const first=scene.children.length,upperStart=upperBuildingColliders.length;makeLandmark(landmark);registerDestructible(buildings[buildings.length-1],scene.children.slice(first+1),upperStart);continue;}
+    if(landmark){const first=scene.children.length,upperStart=upperBuildingColliders.length;makeLandmark(landmark);registerDestructible(buildings[buildings.length-1],scene.children.slice(first+1),upperStart);return;}
     if(roadCrossesBlock(x,z)) {
       // Pavement follows the avenue rather than leaving the entire block as asphalt.
       curvedBlockPavement(x,z);
@@ -441,14 +521,19 @@
         const building={x:bx,z:bz,w:9,d:9,height:height+.7};buildings.push(building);grappleMeshes.push(tower,roof);
         registerDestructible(building,[tower,roof],upperBuildingColliders.length);
       }
-      continue;
+      return;
     }
+    const district=districtAt(x,z),districtValue=random(seed+333);
+    if((district==='harlem'&&districtValue<.85)||(district==='village'&&districtValue<.5)||(district==='brooklyn'&&districtValue<.85)){rowHouseBlock(x,z,seed,district);return;}
     const pavement=box(29,.45,29,mats.sidewalk,x,.2,z); pavement.receiveShadow=true;
     const firstPart=scene.children.length,upperStart=upperBuildingColliders.length;
-    const style=Math.floor(random(seed+90)*11), value=random(seed);
-    const height=Math.floor(style===0?14+value*10:style===1?25+value*30:style===2?62+value*48:style===3?42+value*38:style===5?46+value*32:style===6?20+value*18:style===7?65+value*45:style===8?55+value*42:style===9?44+value*38:style===10?30+value*30:24+value*42);
+    const style=district==='dumbo'||district==='harlem'?6:Math.floor(random(seed+90)*11), value=random(seed);
+    const baseHeight=Math.floor(style===0?14+value*10:style===1?25+value*30:style===2?62+value*48:style===3?42+value*38:style===5?46+value*32:style===6?20+value*18:style===7?65+value*45:style===8?55+value*42:style===9?44+value*38:style===10?30+value*30:24+value*42);
+    // Each neighborhood has its own skyline: tall Midtown and FiDi, low brick elsewhere.
+    const height=Math.floor(district==='uptown'?Math.min(baseHeight,20+value*34):district==='midtown'?Math.max(baseHeight,50+value*70):district==='village'||district==='harlem'?Math.min(baseHeight,14+value*24):
+      district==='fidi'?Math.max(baseHeight,48+value*80):district==='dumbo'?16+value*16:district==='downtown-brooklyn'?Math.min(baseHeight,26+value*48):Math.min(baseHeight,14+value*20));
     const w=(style===2||style===7?16:19)+random(seed+1)*7, d=20+random(seed+2)*6;
-    const facade=buildingMats[style===2?2:style===0?1:style===5?0:style===6?4:style===7||style===8||style===9?5:style===10?3:Math.floor(random(seed+4)*4)];
+    const facade=district==='dumbo'||district==='harlem'?buildingMats[4]:buildingMats[style===2?2:style===0?1:style===5?0:style===6?4:style===7||style===8||style===9?5:style===10?3:Math.floor(random(seed+4)*4)];
     const shape=style===8?'round':style===9?'diamond':style===10?'octagon':null;
     const tower=shape?shapedBuilding(x,z,w,d,.45,height,facade,shape):facadeBox(w,height,d,facade,x,height/2+.45,z); tower.castShadow=true; tower.receiveShadow=true;
     const roof=shape?shapedBuilding(x,z,w+1,d+1,height+.25,.7,mats.roof,shape):box(w+1,.7,d+1,mats.roof,x,height+.6,z); roof.castShadow=true; roof.receiveShadow=true;
@@ -558,6 +643,8 @@
     registerDestructible(building,scene.children.slice(firstPart),upperStart);
 
   }
+  for(let gx=-6;gx<6;gx++)for(let gz=-17;gz<23;gz++)cityBlock(gx,gz);
+  for(let gx=9;gx<19;gx++)for(let gz=11;gz<26;gz++)cityBlock(gx,gz);
   // Fill the former mid-block streets with pavement, producing long blocks while
   // retaining the individual buildings and their existing collision footprints.
   for(let gx=-5;gx<=5;gx+=2)for(let gz=-6;gz<21;gz++) {
@@ -591,7 +678,6 @@
       registerDestructible(house,scene.children.slice(first+1),upperStart);
     }
   }
-  makeSuburbs();
   const playerBuildingColliders=buildings.concat(upperBuildingColliders);
   // Index static footprints once; destroyed buildings are still filtered by
   // insideBuilding, so destruction does not require rebuilding the index.
@@ -634,21 +720,15 @@
   }
   batchBuildingDetails();
   // Road markings share one draw call instead of thousands of separate meshes.
-  const roadMarks=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),mats.line,13*112+13*55+15*55);
-  const markTransform=new THREE.Object3D();let markCount=0;
-  for (let i=-6; i<=6; i++) for (let j=-27; j<85; j++) {
-    const grid=i*40,along=j*10;
-    if(Math.abs(along-Math.round(along/40)*40)>7 && !joinedBlock(grid,along) && !nearCurvedRoad(grid,along,9) && !inPark(grid,along)) {
-      markTransform.position.set(grid,.025,along);markTransform.scale.set(.14,.025,2.7);markTransform.updateMatrix();roadMarks.setMatrixAt(markCount++,markTransform.matrix);
-    }
-    if(j<28 && Math.abs(along-Math.round(along/40)*40)>7 && !nearCurvedRoad(along,grid,9) && !inPark(along,grid)) {
-      markTransform.position.set(along,.025,grid);markTransform.scale.set(2.7,.025,.14);markTransform.updateMatrix();roadMarks.setMatrixAt(markCount++,markTransform.matrix);
-    }
+  const markMatrices=[],markTransform=new THREE.Object3D();
+  function roadMark(x,z,alongZ) {markTransform.position.set(x,.025,z);markTransform.scale.set(alongZ?.14:2.7,.025,alongZ?2.7:.14);markTransform.updateMatrix();markMatrices.push(markTransform.matrix.clone());}
+  const offGrid=v=>Math.abs(v-Math.round(v/40)*40)>7;
+  for(const [minX,maxX,minZ,maxZ] of [[-240,240,manhattanMinZ+20,940],[360,760,brooklyn.minZ+24,1060]]) {
+    for(let x=minX;x<=maxX;x+=40)for(let z=minZ;z<=maxZ;z+=10)if(offGrid(z) && !joinedBlock(x,z) && !nearCurvedRoad(x,z,9) && !inPark(x,z))roadMark(x,z,true);
+    for(let z=Math.ceil(minZ/40)*40;z<=maxZ;z+=40)for(let x=minX-20;x<=maxX+20;x+=10)if(offGrid(x) && !nearCurvedRoad(x,z,9) && !inPark(x,z))roadMark(x,z,false);
   }
-  for(let z=280;z<=840;z+=40)for(let x=-270;x<=270;x+=10) {
-    if(Math.abs(x-Math.round(x/40)*40)<=7)continue;
-    markTransform.position.set(x,.025,z);markTransform.scale.set(2.7,.025,.14);markTransform.updateMatrix();roadMarks.setMatrixAt(markCount++,markTransform.matrix);
-  }
+  const roadMarks=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),mats.line,markMatrices.length);
+  markMatrices.forEach((matrix,i)=>roadMarks.setMatrixAt(i,matrix));const markCount=markMatrices.length;
   roadMarks.count=markCount;roadMarks.computeBoundingSphere();scene.add(roadMarks);
   // Street details give the blocks scale from eye level.
   const taxiMat=new THREE.MeshStandardMaterial({color:0xdba831,roughness:.32,metalness:.35});
@@ -689,8 +769,8 @@
     return new THREE.Mesh(geo,material);
   }
   function makeTrafficState(group,speed,hx,hz,top,seed) {
-    const roadX=Math.round(group.position.x/40)*40;
-    return {group,speed,currentSpeed:speed,hx,hz,top,seed,stuck:false,webRemaining:0,webElapsed:0,
+    const roadX=Math.round(group.position.x/40)*40,inBrooklyn=group.position.x>300;
+    return {group,speed,minZ:inBrooklyn?brooklyn.minZ+12:manhattanMinZ+12,maxZ:inBrooklyn?brooklyn.maxZ-14:manhattanMaxZ-14,roadMin:inBrooklyn?360:-240,roadMax:inBrooklyn?760:240,currentSpeed:speed,hx,hz,top,seed,stuck:false,webRemaining:0,webElapsed:0,
       roadX,preferredLane:group.position.x,laneTarget:group.position.x,laneCooldown:0,lateralSpeed:0,roll:false};
   }
   function parkedCar(x,z,seed) {
@@ -1232,8 +1312,9 @@
     const vendor=makePedestrian(x,z+.95,seed,blockX,blockZ);vendor.settled=true;vendor.vendor=true;vendor.group.rotation.y=0;if(inPark(x,z))vendor.group.position.y=.09;
   }
   let featuredHydrant=null;
+  const hydrants=[];
   function streetDetails(x,z,seed) {
-    if(random(seed+301)>.63){const hydrant=new THREE.Group();hydrant.position.set(x+6.25,.45,z+9);hydrant.userData.targetable=true;scene.add(hydrant);const body=new THREE.Mesh(new THREE.CylinderGeometry(.16,.19,.55,12),fireRed);body.position.y=.28;hydrant.add(body);const cap=new THREE.Mesh(new THREE.SphereGeometry(.16,12,8),fireRed);cap.position.y=.57;hydrant.add(cap);box(.48,.12,.12,fireRed,0,.36,0,hydrant);if(!featuredHydrant || hydrant.position.lengthSq()<featuredHydrant.position.lengthSq())featuredHydrant=hydrant;}
+    if(random(seed+301)>.63){const hydrant=new THREE.Group();hydrant.position.set(x+6.25,.45,z+9);hydrant.userData.targetable=true;scene.add(hydrant);hydrants.push(hydrant);const body=new THREE.Mesh(new THREE.CylinderGeometry(.16,.19,.55,12),fireRed);body.position.y=.28;hydrant.add(body);const cap=new THREE.Mesh(new THREE.SphereGeometry(.16,12,8),fireRed);cap.position.y=.57;hydrant.add(cap);box(.48,.12,.12,fireRed,0,.36,0,hydrant);if(!featuredHydrant || hydrant.position.lengthSq()<featuredHydrant.position.lengthSq())featuredHydrant=hydrant;}
     if(random(seed+302)>.7){const bin=new THREE.Mesh(new THREE.CylinderGeometry(.28,.24,.65,12),parkMetal);bin.position.set(x+6.3,.78,z-9);scene.add(bin);}
     if(random(seed+303)>.82)bench(x+7,z+14,Math.PI/2);
   }
@@ -1281,7 +1362,7 @@
     box(.28,.06,.12,shoeMat,-.05,.85,0,bike);box(.3,.05,.05,metalTrim,.62,.9,0,bike);
   }
   const streetLamps=[];
-  for (let i=-5;i<=5;i++) for (let j=-5;j<=20;j++) {
+  function streetCorner(i,j) {
     const x=i*40,z=j*40,seed=i*83+j*47;
     const parkIntersection=inPark(x,z), midBlock=joinedBlock(x,z+20) && joinedBlock(x,z-20);
     if(!parkIntersection && !midBlock) {
@@ -1317,13 +1398,8 @@
     if((i===1&&j===-2))fireTruck(x-2,z+14,i*31+j);
     if((i===1&&j===-1)||(i===-3&&j===1)||(i===2&&j===0)||(i===1&&j===3))makeShelter(x+6.4,z+21,i*37+j*19,x,z);
   }
-  for(let gx=-4;gx<=4;gx+=2)for(let gz=-11;gz<=-7;gz+=2) {
-    makePedestrian(gx*40+6.4,gz*40+12,6000+gx*37+gz*19,gx*40,gz*40);
-  }
-  for(let gx=-5;gx<5;gx++)for(let gz=-12;gz< -6;gz++)if((gx+gz+30)%2===0)tree(gx*40+5.6,gz*40+31,6100+gx*31+gz*17);
-  for(let gx=-4;gx<=4;gx+=2) {
-    const car=parkedCar(gx*40+2,-280-(gx+4)*18,6200+gx);car.suburban=true;
-  }
+  for(let i=-5;i<=5;i++)for(let j=-17;j<=23;j++)streetCorner(i,j);
+  for(let i=9;i<=19;i++)for(let j=11;j<=26;j++)if(!(i===9&&j===19))streetCorner(i,j);
   // Cars take each avenue in one direction and return along the ordinary streets.
   for(const road of curvedRoads) {
     const first=road.samples[0],last=road.samples[road.samples.length-1];
@@ -1352,10 +1428,17 @@
   window.installStreetLamp=model=>{
     const bounds=new THREE.Box3().setFromObject(model),height=bounds.max.y-bounds.min.y;
     if(!height)return;
-    for(const lamp of streetLamps) {
-      const visual=model.clone(true);visual.scale.setScalar(5/height);visual.position.y=-bounds.min.y*5/height;
-      while(lamp.children.length)lamp.remove(lamp.children[0]);lamp.add(visual);
-    }
+    // One instanced batch per lamp part keeps hundreds of lamps to a few draw calls.
+    model.updateMatrixWorld(true);
+    const base=new THREE.Matrix4().compose(new THREE.Vector3(0,-bounds.min.y*5/height,0),new THREE.Quaternion(),new THREE.Vector3(5/height,5/height,5/height));
+    const lampMatrix=new THREE.Matrix4();
+    model.traverse(part=>{
+      if(!part.isMesh)return;
+      const batch=new THREE.InstancedMesh(part.geometry,part.material,streetLamps.length);batch.castShadow=true;
+      streetLamps.forEach((lamp,i)=>{lamp.updateMatrix();lampMatrix.multiplyMatrices(lamp.matrix,base).multiply(part.matrixWorld);batch.setMatrixAt(i,lampMatrix);});
+      batch.computeBoundingSphere();scene.add(batch);
+    });
+    for(const lamp of streetLamps)while(lamp.children.length)lamp.remove(lamp.children[0]);
   };
   window.installSuburbModel=(variant,model)=>{
     const mesh=model.children.find(child=>child.isMesh),houses=buildings.filter(b=>b.suburb && b.modelVariant===variant);
@@ -1442,23 +1525,23 @@
     const sign=new THREE.Mesh(new THREE.PlaneGeometry(2,.45),displayMaterial('SUBWAY','', '#176b4c'));sign.position.set(0,1.35,-.95);sign.rotation.y=Math.PI;subway.add(sign);
   }
   function makeWashingtonSquare() {
-    const area=new THREE.Group();area.position.set(140,0,220);area.userData.interestKind='washington-square';area.userData.targetable=true;scene.add(area);
+    const area=new THREE.Group();area.position.set(20,0,540);area.userData.interestKind='washington-square';area.userData.targetable=true;scene.add(area);
     box(30,.12,30,pathMat,0,.06,0,area);
     const arch=new THREE.Group();arch.position.set(0,0,-10);area.add(arch);
     for(const side of [-1,1]) {
       const pier=box(2.5,10,2.6,stone,side*5.25,5,0,arch);grappleMeshes.push(pier);
       box(3,.4,3,mats.white,side*5.25,.2,0,arch);box(3,.4,3,mats.white,side*5.25,10,0,arch);
-      const collider={x:140+side*5.25,z:210,w:2.5,d:2.6,height:10};buildings.push(collider);playerBuildingColliders.push(collider);
+      const collider={x:20+side*5.25,z:530,w:2.5,d:2.6,height:10};buildings.push(collider);playerBuildingColliders.push(collider);
     }
     const cap=box(13.5,2.4,2.8,stone,0,11.2,0,arch);grappleMeshes.push(cap);
     box(14,.35,3.1,mats.white,0,12.55,0,arch);
-    const lintel={x:140,z:210,w:13.5,d:2.8,bottom:10,height:12.7};upperBuildingColliders.push(lintel);playerBuildingColliders.push(lintel);
+    const lintel={x:20,z:530,w:13.5,d:2.8,bottom:10,height:12.7};upperBuildingColliders.push(lintel);playerBuildingColliders.push(lintel);
     for(const face of [-1.36,1.36]){const molding=new THREE.Mesh(new THREE.TorusGeometry(4,.25,8,32,Math.PI),mats.white);molding.position.set(0,6,face);arch.add(molding);grappleMeshes.push(molding);}
     const rim=new THREE.Mesh(new THREE.CylinderGeometry(4.4,4.7,.38,40),stone);rim.position.set(0,.2,1);area.add(rim);
     const pool=new THREE.Mesh(new THREE.CylinderGeometry(4,4,.08,40),waterMat);pool.position.set(0,.44,1);area.add(pool);
     const center=new THREE.Mesh(new THREE.CylinderGeometry(.3,.55,1.1,16),stone);center.position.set(0,.96,1);area.add(center);
-    for(const [x,z] of [[-11,-9],[11,-9],[-11,9],[11,9]]){parkTree(140+x,220+z,4100+x*7+z,.12,true);bench(140+x,220+z+(z>0?-2:2),0);}
-    plazaVisitors(140,220,10,10,7,4100);
+    for(const [x,z] of [[-11,-9],[11,-9],[-11,9],[11,9]]){parkTree(20+x,540+z,4100+x*7+z,.12,true);bench(20+x,540+z+(z>0?-2:2),0);}
+    plazaVisitors(20,540,10,10,7,4100);
   }
   const harborBoats=[];
   function makeWaterfront() {
@@ -1538,6 +1621,160 @@
     harborBoats.push(boat);
   }
   makeTheaterPlaza();makeWashingtonSquare();makeWaterfront();
+  // ---- New York landmarks ----
+  const bridgeStone=material(0x9e927d),bridgeDeck=material(0x4b4a46),copper=new THREE.MeshStandardMaterial({color:0x6fa591,roughness:.62,metalness:.25});
+  const torchFlame=new THREE.MeshBasicMaterial({color:0xffc35a}),bronze=new THREE.MeshStandardMaterial({color:0x6b4a2e,roughness:.4,metalness:.7});
+  const cableLine=new THREE.LineBasicMaterial({color:0x8d8a80,transparent:true,opacity:.8});
+  function collider(x,z,w,d,bottom,height,walkable=false) {const c={x,z,w,d,bottom,height,walkable};playerBuildingColliders.push(c);return c;}
+  // Brooklyn Bridge: stone anchorages and two gothic towers carry a walkable deck over the East River.
+  function makeBrooklynBridge() {
+    const deckY=13,west=246,east=380,rampEnd=436,z=bridgeZ;
+    const deck=box(east-west,.6,12,bridgeDeck,(west+east)/2,deckY-.3,z);deck.receiveShadow=true;grappleMeshes.push(deck);
+    collider((west+east)/2,z,east-west,12,deckY-1,deckY,true);
+    for(const side of [-1,1])box(east-west,.9,.15,metal,(west+east)/2,deckY+.45,z+side*6);
+    // The Brooklyn approach steps down gently so you can run off the bridge.
+    const steps=28;
+    for(let i=0;i<steps;i++) {
+      const x0=east+(rampEnd-east)*i/steps,x1=east+(rampEnd-east)*(i+1)/steps,y=deckY*(1-(i+1)/steps)+.45;
+      const step=box(x1-x0+.05,.5,12,bridgeDeck,(x0+x1)/2,y-.25,z);step.receiveShadow=true;collider((x0+x1)/2,z,x1-x0,12,y-.8,y,true);
+    }
+    for(const [x,w] of [[west+8,16],[east-6,12]]) {
+      const anchorage=box(w,deckY+1.5,16,bridgeStone,x,(deckY+1.5)/2-.75,z);anchorage.castShadow=true;grappleMeshes.push(anchorage);
+      buildings.push({x,z,w,d:16,height:deckY+.75});collider(x,z,w,16,-2,deckY+.75,true);
+    }
+    for(const tx of [286,342]) {
+      for(const side of [-1,1]) {
+        const pier=box(7,46,5.5,bridgeStone,tx,21,z+side*9.25);pier.castShadow=true;grappleMeshes.push(pier);collider(tx,z+side*9.25,7,5.5,-2,44);
+      }
+      const top=box(7.6,10,24,bridgeStone,tx,39,z);top.castShadow=true;grappleMeshes.push(top);collider(tx,z,7.6,24,34,44,true);
+      box(8.2,.8,25,mats.white,tx,44.4,z);
+      for(const face of [-1,1])for(const side of [-1,1]) {
+        // Pointed arch windows give the towers their gothic silhouette.
+        const arch=box(.3,9,3,darkGlass,tx+face*3.85,26,z+side*3.6);arch.rotation.x=0;
+        const point=box(.32,2.6,2.2,darkGlass,tx+face*3.86,31.6,z+side*3.6);point.rotation.x=Math.PI/4;
+      }
+    }
+    // Main cables sag between the towers; suspenders and stays drop to the deck.
+    const span=(x)=>{if(x<286)return 16+(x-west)/(286-west)*28;if(x>342)return 44-(x-342)/(east-342)*28;const t=(x-314)/28;return deckY+3+29*t*t;};
+    const suspenders=[];
+    for(const side of [-1,1]) {
+      const points=[];for(let x=west;x<=east;x+=4)points.push(new THREE.Vector3(x,span(x),z+side*6.6));
+      const cable=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points),80,.28,6),metal);cable.castShadow=true;scene.add(cable);grappleMeshes.push(cable);
+      for(let x=west+4;x<east;x+=3)suspenders.push(x,span(x),z+side*6.6,x,deckY,z+side*6.2);
+      for(const tx of [286,342])for(let k=1;k<=8;k++)for(const dir of [-1,1])suspenders.push(tx,40,z+side*6.6,tx+dir*k*4.5,deckY,z+side*6.2);
+    }
+    const lines=new THREE.BufferGeometry();lines.setAttribute('position',new THREE.Float32BufferAttribute(suspenders,3));
+    const web=new THREE.LineSegments(lines,cableLine);web.userData.projectile=true;web.raycast=()=>{};scene.add(web);
+  }
+  // Liberty Island sits in the harbor south of the Battery.
+  function makeStatueOfLiberty() {
+    const site=new THREE.Group();site.position.set(-150,0,1215);site.userData.targetable=true;scene.add(site);
+    box(70,1.2,60,material(0x5f7a53),0,-.3,0,site);
+    for(let i=0;i<5;i++){const fort=box(34,6,34,bridgeStone,0,3,0,site);fort.rotation.y=i*Math.PI*2/10;}
+    box(16,24,16,bridgeStone,0,18,0,site);box(18,1.2,18,mats.white,0,30.6,0,site);box(12,6,12,bridgeStone,0,33.8,0,site);
+    const robe=new THREE.Mesh(new THREE.CylinderGeometry(2.6,4.6,26,14),copper);robe.position.y=49.8;site.add(robe);
+    const shoulders=new THREE.Mesh(new THREE.SphereGeometry(3.1,14,10),copper);shoulders.position.y=63;shoulders.scale.set(1,.7,.85);site.add(shoulders);
+    const head=new THREE.Mesh(new THREE.SphereGeometry(1.9,14,12),copper);head.position.y=66.6;site.add(head);
+    for(let i=0;i<7;i++){const spike=new THREE.Mesh(new THREE.ConeGeometry(.28,2.6,6),copper);const a=-Math.PI*.55+i*Math.PI*1.1/6;spike.position.set(Math.sin(a)*1.9,68.2,-Math.cos(a)*1.9*-1);spike.rotation.set(Math.cos(a)*.9,0,-Math.sin(a)*.9);site.add(spike);}
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(.85,1,13,10),copper);arm.position.set(2.8,70,0);arm.rotation.z=-.22;site.add(arm);
+    const torch=new THREE.Mesh(new THREE.CylinderGeometry(1.1,.5,2.4,10),bronze);torch.position.set(4.2,77.6,0);site.add(torch);
+    const flame=new THREE.Mesh(new THREE.ConeGeometry(.9,2.6,10),torchFlame);flame.position.set(4.2,80,0);site.add(flame);site.userData.flame=flame;
+    const tablet=box(2.4,3.6,.8,copper,-3.2,56,-1.4,site);tablet.rotation.z=.25;
+    site.traverse(child=>{if(child.isMesh){child.castShadow=true;grappleMeshes.push(child);}});
+    const light=new THREE.PointLight(0xffb44a,30,40);light.position.set(4.2,80,0);site.add(light);
+    return site;
+  }
+  // Battery Park: lawns, a promenade, and the famous bronze bull at Bowling Green.
+  function makeBatteryPark() {
+    const lawn=new THREE.MeshStandardMaterial({color:0x58804c,roughness:.95});
+    box(520,.12,54,lawn,0,.06,971).receiveShadow=true;box(524,.16,6,mats.sidewalk,0,.08,manhattanMaxZ-4);
+    for(let x=-250;x<=250;x+=5)box(.1,1,.1,metal,x,.6,manhattanMaxZ-1.2);
+    box(524,.08,.1,metal,0,1.1,manhattanMaxZ-1.2);
+    for(let i=0;i<26;i++)parkTree(-240+i*19+random(i*7)*6,952+random(i*3)*36,8800+i,.12,true);
+    for(let i=0;i<8;i++)bench(-200+i*55,992,Math.PI);
+    const bull=new THREE.Group();bull.position.set(20,.45,925);bull.rotation.y=-.4;bull.userData.targetable=true;scene.add(bull);
+    box(6,1.2,3,bridgeStone,0,.6,0,bull);
+    oval(bull,bronze,0,2.5,0,1.9,1.05,.95);oval(bull,bronze,1.9,2.6,0,.7,.62,.55);oval(bull,bronze,-1.6,2.4,0,.75,.8,.85);
+    for(const side of [-1,1]){const horn=new THREE.Mesh(new THREE.ConeGeometry(.12,1.2,6),bronze);horn.position.set(2.3,3.3,side*.55);horn.rotation.z=-1.1;horn.rotation.x=side*.6;bull.add(horn);}
+    for(const dx of [-1.2,1.2])for(const dz of [-.45,.45]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.16,.13,1.4,6),bronze);leg.position.set(dx,1.6,dz);bull.add(leg);}
+    bull.traverse(child=>{if(child.isMesh){child.castShadow=true;grappleMeshes.push(child);}});
+    collider(20,925,6,3,0,1.65,true);
+    plazaVisitors(20,935,10,6,6,8900);
+  }
+  // Coney Island: sand, a boardwalk, a hot dog joint, and a spinning Wonder Wheel.
+  const wonderWheel={group:null,rim:null,cars:[]};
+  function makeConeyIsland() {
+    const sand=material(0xd6c08a),plank=material(0x8a6a48);
+    box(brooklyn.maxX-brooklyn.minX,.1,brooklyn.maxZ-1064,sand,(brooklyn.minX+brooklyn.maxX)/2,.05,(brooklyn.maxZ+1064)/2).receiveShadow=true;
+    box(brooklyn.maxX-brooklyn.minX,.4,8,plank,(brooklyn.minX+brooklyn.maxX)/2,.2,1066).receiveShadow=true;
+    collider((brooklyn.minX+brooklyn.maxX)/2,1066,brooklyn.maxX-brooklyn.minX,8,-.5,.4,true);
+    for(let i=0;i<14;i++){const umbrella=new THREE.Mesh(new THREE.ConeGeometry(1.6,.7,10),new THREE.MeshStandardMaterial({color:[0xe0454b,0x3d7fd6,0xf2c14a,0x3fb37f][i%4],roughness:.7}));umbrella.position.set(380+i*27,2.4,1088+random(i)*14);scene.add(umbrella);box(.08,2.2,.08,metal,umbrella.position.x,1.1,umbrella.position.z);}
+    const wheel=new THREE.Group();wheel.position.set(560,27,1084);scene.add(wheel);wonderWheel.group=wheel;
+    const frame=new THREE.MeshStandardMaterial({color:0xe8e2d4,roughness:.5,metalness:.4});
+    for(const side of [-1,1])for(const lean of [-1,1]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.5,.7,30,8),frame);leg.position.set(560+lean*8,13,1084+side*3);leg.rotation.z=lean*.27;leg.castShadow=true;scene.add(leg);grappleMeshes.push(leg);}
+    const rim=new THREE.Group();wheel.add(rim);wonderWheel.rim=rim;
+    for(const side of [-1,1]){const ring=new THREE.Mesh(new THREE.TorusGeometry(22,.45,8,64),frame);ring.position.z=side*1.6;rim.add(ring);const inner=new THREE.Mesh(new THREE.TorusGeometry(13,.3,6,48),frame);inner.position.z=side*1.6;rim.add(inner);}
+    for(let i=0;i<16;i++){const spoke=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,44,6),frame);spoke.rotation.z=i*Math.PI/16;rim.add(spoke);}
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(2,2,4,16),new THREE.MeshStandardMaterial({color:0xd84d4d,roughness:.5}));hub.rotation.x=Math.PI/2;rim.add(hub);
+    const carColors=[0xd84d4d,0xf2c14a,0x3d7fd6,0x3fb37f];
+    for(let i=0;i<16;i++) {
+      const a=i*Math.PI*2/16,car=new THREE.Group();car.position.set(Math.cos(a)*22,Math.sin(a)*22,0);rim.add(car);
+      const cab=new THREE.Mesh(new THREE.BoxGeometry(3,2.4,2.4),new THREE.MeshStandardMaterial({color:carColors[i%4],roughness:.5}));cab.position.y=-2;car.add(cab);
+      box(.12,1.6,.12,metal,0,-.6,0,car);wonderWheel.cars.push(car);
+    }
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(18,4.5),displayMaterial('WONDER WHEEL','RIDE AT YOUR OWN RISK','#d84d4d'));sign.position.set(560,4.5,1076.5);sign.rotation.y=Math.PI;scene.add(sign);
+    wheel.traverse(child=>{if(child.isMesh){child.castShadow=true;grappleMeshes.push(child);}});
+    hotDogStand(470,1060,8701,440,1040);hotDogStand(660,1060,8702,640,1040);
+    plazaVisitors(520,1090,60,10,10,8800);
+  }
+  // Times Square: giant glowing billboards with ads nobody asked for.
+  const timesSquareScreens=[];
+  function billboardCanvas(lines,colors) {
+    const image=document.createElement('canvas');image.width=512;image.height=320;const c=image.getContext('2d');
+    const grad=c.createLinearGradient(0,0,512,320);grad.addColorStop(0,colors[0]);grad.addColorStop(1,colors[1]);c.fillStyle=grad;c.fillRect(0,0,512,320);
+    c.textAlign='center';c.fillStyle='#fff';c.shadowColor='rgba(0,0,0,.5)';c.shadowBlur=8;
+    c.font='900 64px Arial Black, Arial';c.fillText(lines[0],256,120);c.font='bold 30px Arial';c.fillText(lines[1],256,185);c.font='bold 24px Arial';c.fillStyle='#ffe98a';c.fillText(lines[2]||'',256,250);
+    const texture=new THREE.CanvasTexture(image);texture.colorSpace=THREE.SRGBColorSpace;return texture;
+  }
+  const newsTicker={canvas:document.createElement('canvas'),texture:null,text:'WELCOME TO NEW YORK  •  WATCH FOR FALLING CIVILIANS  •  HOT DOGS NOW $14  •  ',offset:0};
+  newsTicker.canvas.width=2048;newsTicker.canvas.height=64;newsTicker.texture=new THREE.CanvasTexture(newsTicker.canvas);newsTicker.texture.colorSpace=THREE.SRGBColorSpace;
+  newsTicker.texture.wrapS=THREE.RepeatWrapping;
+  function setNews(text) {
+    newsTicker.text=`${text}  •  `;const c=newsTicker.canvas.getContext('2d');
+    c.fillStyle='#0b0b12';c.fillRect(0,0,2048,64);c.fillStyle='#ff4747';c.font='900 40px Arial';c.textBaseline='middle';
+    let x=10;while(x<2048){c.fillText(newsTicker.text,x,34);x+=c.measureText(newsTicker.text).width;}newsTicker.texture.needsUpdate=true;
+  }
+  setNews('LIVE FROM TIMES SQUARE  •  SPIDER-MENACE SPOTTED  •  HOT DOGS NOW $14  •  RENT: YES');
+  function makeTimesSquare() {
+    const ads=[[['SPIDER-MENACE','Caught on camera AGAIN','Daily Bugle • 50¢'],['#b3122b','#2a0b14']],[['HIT BY A SPIDER?','Call 1-800-STICKY','Lawyers who actually call back'],['#1d5bd8','#0b1638']],
+      [['CATS 2: DOGS','Now playing on Broadway','"Why?" — Everyone'],['#7a2bd1','#1b0b33']],[['HOT DOGS','$14. Do not ask.','Since 1916-ish'],['#f2a22a','#5a2a06']],
+      [['I ♥ NY','Tolerate NY','Fine, love-ish NY'],['#ffffff','#d8263a']],[['NEW YEAR\'S EVE','Only 61 days of standing','Bring diapers'],['#18a07d','#062b22']]];
+    const placements=[[-15,-14,0,32],[15,-14,0,40],[-15,14,Math.PI,28],[15,14,Math.PI,36],[-15,0,Math.PI/2,46],[15,0,-Math.PI/2,24]];
+    placements.forEach(([dx,dz,angle,height],i)=>{
+      const sign=new THREE.Group();sign.position.set(60+dx*1.05,0,220+dz*1.05);sign.rotation.y=angle;scene.add(sign);
+      const pole=box(.9,height,.9,metal,0,height/2,0,sign);grappleMeshes.push(pole);
+      const frameMesh=box(14.6,9.4,.6,metal,0,height+3.5,-.35,sign);grappleMeshes.push(frameMesh);
+      const texture=billboardCanvas(...ads[i]);const screen=new THREE.Mesh(new THREE.PlaneGeometry(14,9),new THREE.MeshBasicMaterial({map:texture,toneMapped:false}));
+      screen.position.set(0,height+3.5,.02);sign.add(screen);timesSquareScreens.push(screen);
+      const back=new THREE.Mesh(screen.geometry,new THREE.MeshBasicMaterial({map:billboardCanvas(...ads[(i+3)%ads.length]),toneMapped:false}));back.position.set(0,height+3.5,-.72);back.rotation.y=Math.PI;sign.add(back);
+    });
+    const ticker=new THREE.Mesh(new THREE.CylinderGeometry(9,9,3,48,1,true),new THREE.MeshBasicMaterial({map:newsTicker.texture,toneMapped:false}));
+    ticker.position.set(60,20,220);newsTicker.texture.repeat.set(2,1);scene.add(ticker);newsTicker.mesh=ticker;
+    const ball=new THREE.Mesh(new THREE.IcosahedronGeometry(2.2,1),new THREE.MeshStandardMaterial({color:0xe8f4ff,metalness:.9,roughness:.15,emissive:0x3355aa,emissiveIntensity:.4}));
+    ball.position.set(60,52,220);scene.add(ball);box(.4,16,.4,metal,60,42,220);grappleMeshes.push(ball);newsTicker.ball=ball;
+  }
+  const skylineStart=scene.children.length;
+  makeBrooklynBridge();const liberty=makeStatueOfLiberty();makeConeyIsland();makeTimesSquare();
+  // Landmarks stay drawn at any distance; they are how you find your way.
+  for(const object of scene.children.slice(skylineStart))if(!object.userData.actor)object.userData.skyline=true;
+  makeBatteryPark();
+  function updateLandmarks(dt) {
+    if(wonderWheel.rim){wonderWheel.rim.rotation.z+=dt*.12;for(const car of wonderWheel.cars)car.rotation.z=-wonderWheel.rim.rotation.z;}
+    newsTicker.texture.offset.x=(newsTicker.texture.offset.x+dt*.05)%1;
+    waterNormals.offset.set((elapsed*.004)%1,(elapsed*.0025)%1);
+    if(newsTicker.ball)newsTicker.ball.rotation.y+=dt*.8;
+    liberty.userData.flame.scale.set(1+.08*Math.sin(elapsed*13),1+.15*Math.sin(elapsed*9),1);
+  }
   function rooftopRest(person) {
     if(person.rooftopKind==='view') {poseSittingLegs(person,1.25);person.leftArm.rotation.x=-.15;person.rightArm.rotation.x=-.15;}
   }
@@ -1764,7 +2001,7 @@
     const actor={kind,group,body,head,limbs,arms,elbows,legs,knees,glider,glow,spawn:new THREE.Vector3(x,y,z),state:'idle',timer:0,webHits:0,stuck:false,webRemaining:0,hx:.7,hz:.7,top:2.6};
     group.userData.actor=actor;villains.push(actor);return actor;
   }
-  makeVillain('goblin',120,27,160);makeVillain('electro',160,0,-80);makeVillain('octopus',-160,0,-360);
+  makeVillain('goblin',100,72,340);makeVillain('electro',80,0,232);makeVillain('octopus',40,0,800);
   // A separate foreground scene keeps the hands visible even close to a wall.
   const handsScene = new THREE.Scene();
   const handsCamera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .03, 20);
@@ -1844,8 +2081,34 @@
     const line=new THREE.Line(geometry,new THREE.LineBasicMaterial({color:strand===0?0xffffff:0xb7cdd1,transparent:true,opacity:strand===0?.95:.75}));
     line.visible=false; scene.add(line); webLines.push(line);
   }
+  // A camera-facing ribbon gives the main strand real thickness at any distance.
+  const ribbonPositions=new Float32Array(25*2*3),ribbonGeometry=new THREE.BufferGeometry();
+  ribbonGeometry.setAttribute('position',new THREE.BufferAttribute(ribbonPositions,3));
+  {const index=[];for(let i=0;i<24;i++){const j=i*2;index.push(j,j+1,j+2,j+1,j+3,j+2);}ribbonGeometry.setIndex(index);}
+  const webRibbon=new THREE.Mesh(ribbonGeometry,new THREE.MeshBasicMaterial({color:0xf4fdff,side:THREE.DoubleSide,transparent:true,opacity:.92,depthWrite:false}));
+  webRibbon.frustumCulled=false;webRibbon.visible=false;webRibbon.userData.projectile=true;webRibbon.raycast=()=>{};scene.add(webRibbon);
+  const ribbonA=new THREE.Vector3(),ribbonB=new THREE.Vector3(),ribbonC=new THREE.Vector3(),ribbonSide=new THREE.Vector3();
+  function updateWebRibbon() {
+    const source=webLines[0].geometry.attributes.position;
+    for(let i=0;i<=24;i++) {
+      ribbonA.fromBufferAttribute(source,i);ribbonB.fromBufferAttribute(source,Math.max(0,i-1));ribbonC.fromBufferAttribute(source,Math.min(24,i+1));
+      ribbonSide.subVectors(ribbonC,ribbonB).cross(ribbonB.subVectors(ribbonA,camera.position));
+      if(ribbonSide.lengthSq()<1e-10)ribbonSide.set(0,1,0);
+      ribbonSide.normalize().multiplyScalar(.032*(1-.45*i/24));
+      ribbonPositions[i*6]=ribbonA.x+ribbonSide.x;ribbonPositions[i*6+1]=ribbonA.y+ribbonSide.y;ribbonPositions[i*6+2]=ribbonA.z+ribbonSide.z;
+      ribbonPositions[i*6+3]=ribbonA.x-ribbonSide.x;ribbonPositions[i*6+4]=ribbonA.y-ribbonSide.y;ribbonPositions[i*6+5]=ribbonA.z-ribbonSide.z;
+    }
+    ribbonGeometry.attributes.position.needsUpdate=true;
+  }
+  // A ring shows where the next web would attach before you fire it.
+  const anchorPreview=(()=>{
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const g=canvas.getContext('2d');
+    g.strokeStyle='#fff';g.lineWidth=5;g.beginPath();g.arc(32,32,24,0,Math.PI*2);g.stroke();g.fillStyle='#fff';g.beginPath();g.arc(32,32,5,0,Math.PI*2);g.fill();
+    const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true,opacity:.75,depthTest:false,sizeAttenuation:false}));
+    sprite.scale.setScalar(.03);sprite.visible=false;sprite.renderOrder=10;sprite.raycast=()=>{};scene.add(sprite);return sprite;
+  })();
   const raycaster=new THREE.Raycaster(); raycaster.far=110;
-  function showWeb(visible) { for(const line of webLines) line.visible=visible; }
+  function showWeb(visible) { for(const line of webLines) line.visible=visible; webRibbon.visible=visible; }
   const anchorMarker=new THREE.Mesh(new THREE.SphereGeometry(.23,12,8),new THREE.MeshBasicMaterial({color:0xe8fbff}));
   anchorMarker.visible=false;scene.add(anchorMarker);
   const keys={forward:false,back:false,left:false,right:false,sprint:false,swing:false};
@@ -1879,6 +2142,322 @@
     speedBlur.style.opacity=String(speedBlurAmount);
   }
   const nukeButton=document.getElementById('nuke'),blastFlash=document.getElementById('blast-flash'),blastWind=document.getElementById('blast-wind'),blastBlackout=document.getElementById('blast-blackout');
+  // ---- Chaos: score, combos, public opinion, popups, voices, particles ----
+  let chaosScore=0,comboPoints=0,comboMultiplier=1,comboTimer=0,opinion=50,trickSpin=0,trickDirection=1,gravityScale=1;
+  let timeScale=1,slowMotion=false,hitStop=0,screenShake=0,slapCooldown=0,slapAnimation=0,previewTimer=0,rainTimer=3;
+  const mutators={moon:false,bobble:false,raining:false,rocket:false};
+  const chaosScoreLabel=document.getElementById('chaos-score'),comboLabel=document.getElementById('chaos-combo'),chaosFeed=document.getElementById('chaos-feed');
+  const opinionLabel=document.getElementById('opinion-label'),opinionBar=document.getElementById('opinion-bar'),popupLayer=document.getElementById('popups');
+  const pick=list=>list[Math.floor(Math.random()*list.length)];
+  const lines={
+    hit:['MY SPINE!',"I'm suing!",'Not the face!','Worth it.','I just got out of the hospital!','Is this a bit?!','Call my lawyer!','You absolute MENACE','Do you have insurance?!','Not again...','I felt that in my 401k','THIS IS MY GOOD SHIRT','Why do you smell like the subway?','Free chiropractic!','My Uber was RIGHT there','Tell my wife... actually don\'t','Is this a photo op?!','I pay TAXES','Yelp review incoming','Ow ow ow ow','I was walking to therapy!','Bro what','Rent is $4,000 for THIS?'],
+    fly:['WHEEEEE','AAAAAAAAH','I CAN SEE MY APARTMENT','I regret everything','not like this','MOMMY','I CAN FLY?!','this is fine','WORST COMMUTE EVER'],
+    land:["I'm okay!",'...I\'m okay','Nothing broken. Probably.','10/10 would fly again','Ow.','I landed in gum','Who\'s paying for this?','Can\'t feel my legs. Cool.','Still better than the L train'],
+    saved:['My hero!','You smell weird but thanks','Took you long enough','I would\'ve been fine','Put me down please','Is this sticky stuff... clean?','I\'m posting this'],
+    webbed:['Mmmph!','Sticky in a BAD way','Oh, come ON','I\'m late for work!','This is assault','Is this... organic?','Unhand me, bug boy'],
+    greet:['Hey it\'s Spider-Man!','Pay your rent, Peter!','Do a flip!','Are those pajamas?','My kid loves you. I don\'t.','Please don\'t.','Oh no. Not him.','Sign my cast? You broke it.','You owe me a hot dog','Menace!!'],
+    revive:['...I\'m okay!','I\'M FINE','Walk it off, Gary','Cartoon physics, baby','Back from the dead, still late']
+  };
+  const opinionTiers=[[0,'PUBLIC ENEMY #1'],[15,'MENACE'],[30,'NUISANCE'],[45,'MID'],[60,'FRIENDLY-ISH'],[75,'NEIGHBORHOOD HERO'],[90,'LITERAL ANGEL']];
+  function adjustOpinion(amount) {
+    opinion=THREE.MathUtils.clamp(opinion+amount,0,100);
+    let tier=opinionTiers[0][1];for(const [threshold,name] of opinionTiers)if(opinion>=threshold)tier=name;
+    if(opinionLabel){opinionLabel.textContent=tier;opinionBar.style.width=`${opinion}%`;opinionBar.style.background=opinion<30?'#ff5b4f':opinion<60?'#ffc75e':'#6ff09a';}
+  }
+  // Each award extends the combo; the multiplier grows with the chain.
+  function awardChaos(points,label,point=null,kind='hit') {
+    comboPoints+=points;comboTimer=3.5;comboMultiplier=Math.min(10,comboMultiplier+(kind==='trick'?.5:1));
+    if(chaosFeed) {
+      const row=document.createElement('div');row.className=`feed-row ${kind}`;row.textContent=`${label} +${points}`;chaosFeed.prepend(row);
+      while(chaosFeed.children.length>5)chaosFeed.lastChild.remove();setTimeout(()=>row.classList.add('fade'),1600);setTimeout(()=>row.remove(),2300);
+    }
+    if(point)worldPopup(label,point,`burst ${kind}`,1.1);
+    if(kind==='hit')adjustOpinion(-1.5);else if(kind==='hero')adjustOpinion(8);else if(kind==='oops')adjustOpinion(-6);
+    updateComboLabel();
+  }
+  function updateComboLabel() {
+    if(!comboLabel)return;
+    comboLabel.textContent=comboPoints?`${comboPoints.toLocaleString()} × ${Math.floor(comboMultiplier)}`:'';
+    comboLabel.classList.toggle('hot',comboMultiplier>=5);
+  }
+  function updateChaos(dt) {
+    if(comboTimer>0) {
+      comboTimer-=dt;
+      if(comboTimer<=0) {
+        const banked=Math.round(comboPoints*Math.floor(comboMultiplier));chaosScore+=banked;
+        if(banked>=1500)worldPopup(`COMBO ${banked.toLocaleString()}!`,camera.position.clone().add(new THREE.Vector3(-Math.sin(yaw)*6,1.2,-Math.cos(yaw)*6)),'burst combo',1.6);
+        comboPoints=0;comboMultiplier=1;updateComboLabel();
+        if(chaosScore>=250000)unlockNuke('250,000 CHAOS');
+        if(chaosScoreLabel)chaosScoreLabel.textContent=chaosScore.toLocaleString();
+      }
+    }
+  }
+  const popups=[],popupPoint=new THREE.Vector3();
+  function worldPopup(text,point,className,life=1.4,follow=null) {
+    if(!popupLayer)return;
+    const element=document.createElement('div');element.className=`popup ${className}`;element.textContent=text;popupLayer.appendChild(element);
+    popups.push({element,point:point.clone(),follow,life,age:0,rise:className==='speech'?.25:1.8});
+    if(popups.length>28){const old=popups.shift();old.element.remove();}
+  }
+  function say(actor,kind,chance=1) {
+    if(Math.random()>chance || !actor?.group || actor.group.position.distanceTo(position)>60)return;
+    if(actor.lastSpoke && elapsed-actor.lastSpoke<2.2)return;actor.lastSpoke=elapsed;
+    worldPopup(pick(lines[kind]),actor.group.position.clone().add(new THREE.Vector3(0,2.6,0)),'speech',2.3,actor);
+  }
+  function updatePopups(dt) {
+    for(let i=popups.length-1;i>=0;i--) {
+      const popup=popups[i];popup.age+=dt;
+      if(popup.age>=popup.life){popup.element.remove();popups.splice(i,1);continue;}
+      if(popup.follow)popup.point.copy(popup.follow.group.position).y+=2.6;
+      popupPoint.copy(popup.point);popupPoint.y+=popup.rise*popup.age;
+      const distance=popupPoint.distanceTo(camera.position);popupPoint.project(camera);
+      const visible=popupPoint.z<1 && Math.abs(popupPoint.x)<1.1 && Math.abs(popupPoint.y)<1.1;
+      popup.element.style.display=visible?'':'none';if(!visible)continue;
+      const scale=THREE.MathUtils.clamp(16/Math.max(distance,1),.45,1.4)*(popup.element.classList.contains('burst')?1+.4*Math.max(0,1-popup.age*6):1);
+      popup.element.style.transform=`translate(${(popupPoint.x*.5+.5)*innerWidth}px,${(-popupPoint.y*.5+.5)*innerHeight}px) translate(-50%,-100%) scale(${scale.toFixed(3)})`;
+      popup.element.style.opacity=String(Math.min(1,(popup.life-popup.age)*3));
+    }
+  }
+  // Synthesized vowel-ish voices: a sawtooth through two formant filters.
+  function playVoice(point,kind='yelp') {
+    if(!effectsEnabled || !soundContext || soundContext.state!=='running' || paused)return;
+    const distance=point?point.distanceTo(position):0,volume=Math.max(0,1-distance/90);if(volume<=0)return;
+    const now=soundContext.currentTime,scream=kind==='scream',length=scream?1.1+Math.random()*.5:kind==='yelp'?.32:.22;
+    const base=scream?330+Math.random()*300:kind==='yelp'?260+Math.random()*260:110+Math.random()*80;
+    const voice=soundContext.createOscillator(),vibrato=soundContext.createOscillator(),depth=soundContext.createGain(),gain=soundContext.createGain();
+    voice.type='sawtooth';voice.frequency.setValueAtTime(base*(scream?1.15:1.3),now);voice.frequency.exponentialRampToValueAtTime(base*(scream?.6:.7),now+length);
+    vibrato.frequency.value=scream?6+Math.random()*4:14;depth.gain.value=base*(scream?.05:.03);vibrato.connect(depth);depth.connect(voice.frequency);
+    gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.09*volume,now+.03);gain.gain.setValueAtTime(.09*volume,now+length*.7);gain.gain.exponentialRampToValueAtTime(.0001,now+length);
+    for(const [frequency,level] of [[scream?850:700,1],[scream?1300:1150,.6]]) {
+      const formant=soundContext.createBiquadFilter(),mix=soundContext.createGain();formant.type='bandpass';formant.frequency.value=frequency;formant.Q.value=4;mix.gain.value=level*2.2;
+      voice.connect(formant);formant.connect(mix);mix.connect(gain);
+    }
+    gain.connect(effectsBus);voice.start(now);vibrato.start(now);voice.stop(now+length);vibrato.stop(now+length);
+  }
+  // Pooled soft point particles for dust, splashes, confetti and impact sparks.
+  const particleMax=900,particlePosition=new Float32Array(particleMax*3),particleColor=new Float32Array(particleMax*3),particleSize=new Float32Array(particleMax),particleAlpha=new Float32Array(particleMax);
+  const particles=Array.from({length:particleMax},()=>({life:0,max:1,velocity:new THREE.Vector3(),gravity:0,drag:0,size:1}));let particleCursor=0;
+  const particleGeometry=new THREE.BufferGeometry();
+  particleGeometry.setAttribute('position',new THREE.BufferAttribute(particlePosition,3));particleGeometry.setAttribute('color',new THREE.BufferAttribute(particleColor,3));
+  particleGeometry.setAttribute('size',new THREE.BufferAttribute(particleSize,1));particleGeometry.setAttribute('alpha',new THREE.BufferAttribute(particleAlpha,1));
+  const particleMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{viewport:{value:innerHeight*renderer.getPixelRatio()}},
+    vertexShader:'attribute float size;attribute float alpha;attribute vec3 color;uniform float viewport;varying float vAlpha;varying vec3 vColor;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;gl_PointSize=size*projectionMatrix[1][1]*viewport*.5/max(-mv.z,.1);vAlpha=alpha;vColor=color;}',
+    fragmentShader:'varying float vAlpha;varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(vColor,vAlpha*smoothstep(.5,.2,d));}'});
+  const particleSystem=new THREE.Points(particleGeometry,particleMaterial);particleSystem.frustumCulled=false;particleSystem.userData.projectile=true;particleSystem.raycast=()=>{};scene.add(particleSystem);
+  const burstColor=new THREE.Color();
+  function burst(point,count,color,{speed=6,up=4,life=.8,gravity=12,size=.35,drag=1.5,spread=.3}={}) {
+    const colors=Array.isArray(color)?color:[color];
+    for(let n=0;n<count;n++) {
+      const i=particleCursor;particleCursor=(particleCursor+1)%particleMax;const particle=particles[i];
+      particle.life=particle.max=life*(.6+Math.random()*.6);particle.gravity=gravity;particle.drag=drag;particle.size=size*(.6+Math.random()*.8);
+      particle.velocity.set(Math.random()*2-1,Math.random()*2-1,Math.random()*2-1).normalize().multiplyScalar(speed*(.3+Math.random()*.7));particle.velocity.y+=up*Math.random();
+      particlePosition[i*3]=point.x+(Math.random()-.5)*spread;particlePosition[i*3+1]=point.y+(Math.random()-.5)*spread;particlePosition[i*3+2]=point.z+(Math.random()-.5)*spread;
+      burstColor.set(colors[n%colors.length]);particleColor[i*3]=burstColor.r;particleColor[i*3+1]=burstColor.g;particleColor[i*3+2]=burstColor.b;
+    }
+  }
+  function updateParticles(dt) {
+    for(let i=0;i<particleMax;i++) {
+      const particle=particles[i];
+      if(particle.life<=0){particleAlpha[i]=0;continue;}
+      particle.life-=dt;particle.velocity.y-=particle.gravity*dt;particle.velocity.multiplyScalar(Math.exp(-particle.drag*dt));
+      particlePosition[i*3]+=particle.velocity.x*dt;particlePosition[i*3+1]+=particle.velocity.y*dt;particlePosition[i*3+2]+=particle.velocity.z*dt;
+      const t=Math.max(0,particle.life/particle.max);particleAlpha[i]=Math.min(1,t*2.5);particleSize[i]=particle.size*(.5+.5*t);
+    }
+    for(const name of ['position','color','size','alpha'])particleGeometry.attributes[name].needsUpdate=true;
+  }
+  const confetti=[0xff4f6d,0xffd25e,0x5ee0ff,0x8dff7a,0xc68bff,0xffffff];
+  // Speed streaks on a 2D overlay sell velocity far better than FOV alone.
+  const speedLines=document.getElementById('speed-lines'),speedContext=speedLines?.getContext('2d'),streaks=[];
+  function updateSpeedLines(dt,speed) {
+    if(!speedContext)return;
+    const w=speedLines.width=Math.round(innerWidth/2),h=speedLines.height=Math.round(innerHeight/2),amount=THREE.MathUtils.smoothstep(speed,24,62)*(slowMotion?.4:1);
+    if(amount<=0 && !streaks.length)return;
+    while(streaks.length<70*amount)streaks.push({angle:Math.random()*Math.PI*2,radius:.35+Math.random()*.3,length:.08+Math.random()*.14,speed:1.6+Math.random()*1.8});
+    speedContext.lineCap='round';
+    for(let i=streaks.length-1;i>=0;i--) {
+      const streak=streaks[i];streak.radius+=streak.speed*dt;
+      if(streak.radius>1.15){if(streaks.length>70*amount)streaks.splice(i,1);else{streak.radius=.35+Math.random()*.2;streak.angle=Math.random()*Math.PI*2;}continue;}
+      const cx=w/2,cy=h/2,scale=Math.hypot(w,h)/2,x1=cx+Math.cos(streak.angle)*streak.radius*scale,y1=cy+Math.sin(streak.angle)*streak.radius*scale;
+      const x2=cx+Math.cos(streak.angle)*(streak.radius+streak.length)*scale,y2=cy+Math.sin(streak.angle)*(streak.radius+streak.length)*scale;
+      speedContext.strokeStyle=`rgba(255,255,255,${(.32*amount*Math.min(1,(streak.radius-.35)*4)).toFixed(3)})`;speedContext.lineWidth=1+streak.length*8;
+      speedContext.beginPath();speedContext.moveTo(x1,y1);speedContext.lineTo(x2,y2);speedContext.stroke();
+    }
+  }
+  function updateMutators(dt) {
+    gravityScale=mutators.moon?.38:1;
+    if(!mutators.raining || nuke)return;
+    rainTimer-=dt;if(rainTimer>0)return;
+    rainTimer=2+Math.random()*2.5;
+    // It's raining men: borrow a passer-by and drop them from the sky nearby.
+    const candidates=pedestrians.filter(n=>!n.dead&&!n.knockback&&!n.webHeld&&!n.webPinned&&!n.settled&&!n.rooftop&&!n.wheelchair&&!n.dog&&n.group.visible&&n!==rescue?.actor&&n.group.position.distanceTo(position)>60);
+    if(!candidates.length)return;
+    const npc=pick(candidates),x=THREE.MathUtils.clamp(position.x+(Math.random()-.5)*50+velocity.x*1.5,worldMinX+8,worldMaxX-8),z=THREE.MathUtils.clamp(position.z+(Math.random()-.5)*50+velocity.z*1.5,worldMinZ+5,worldMaxZ-5);
+    if((buildingCells.get(`${Math.floor(x/40)},${Math.floor(z/40)}`)||[]).some(b=>insideBuilding(x,z,b,1)) || waterAt(x,z))return;
+    cancelVisit(npc);cancelDonation(npc);npc.group.position.set(x,Math.max(position.y+30,45)+Math.random()*25,z);
+    npc.knockback={ground:inPark(x,z)?.1+parkElevation(x,z):.45,velocity:new THREE.Vector3(0,-2,0),spin:2.5,time:0,lethal:true};say(npc,'fly');
+  }
+  function setMutator(name,value) {
+    mutators[name]=value;
+    if(name==='bobble')for(const npc of pedestrians)npc.head.scale.setScalar(value?2.5:1);
+    const button=document.querySelector(`[data-mutator="${name}"]`);if(button){button.setAttribute('aria-pressed',String(value));button.classList.toggle('on',value);}
+  }
+  document.querySelectorAll('[data-mutator]').forEach(button=>button.addEventListener('click',()=>setMutator(button.dataset.mutator,!mutators[button.dataset.mutator])));
+  function impactFeedback(strength) {hitStop=Math.max(hitStop,Math.min(.09,.03+strength*.012));screenShake=Math.min(1.2,screenShake+strength*.12);}
+  // Spider-slap: a short melee cone that sends anything in front flying.
+  function spiderSlap() {
+    if(slapCooldown>0 || paused)return;
+    slapCooldown=.32;slapAnimation=.3;playEffect('slap');
+    const forward=new THREE.Vector3(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
+    const flat=new THREE.Vector3(forward.x,0,forward.z).normalize();let hits=0;
+    for(const actor of [...pedestrians,...cars,...chargeProps]) {
+      if(actor.dead || !actor.group.visible)continue;
+      const p=actor.group.position,dx=p.x-position.x,dz=p.z-position.z,dy=p.y-position.y,reach=cars.includes(actor)?4.5+Math.max(actor.hx,actor.hz):3.6;
+      const d=Math.hypot(dx,dz);if(d>reach || Math.abs(dy)>3)continue;
+      if(d>.6 && (dx*flat.x+dz*flat.z)/d<.45)continue;
+      const car=cars.includes(actor),power=car?20:30;
+      const launch=new THREE.Vector3(flat.x*power,car?11:13+Math.max(0,forward.y)*12,flat.z*power).addScaledVector(velocity,.5);
+      if(actor.webHeld)cancelWebGrab();if(actor.webPinned){clearWebPin(actor);releaseActorWeb(actor);}
+      throwActor(actor,flat,false,launch);hits++;
+      const point=p.clone().add(new THREE.Vector3(0,1.2,0));burst(point,14,[0xfff2a8,0xffffff],{speed:9,up:3,life:.4,gravity:4,size:.28});
+      if(pedestrians.includes(actor)){awardChaos(120,pick(['SPIDER-SLAP','BACKHAND','DISRESPECT','POW!']),point);say(actor,'hit',.8);playVoice(p,'yelp');}
+      else if(car)awardChaos(300,'CAR SLAP',point);
+      else awardChaos(200,pick(['BENCH PRESS','PUBLIC SEATING YEET','PARKS DEPT. CRYING']),point);
+    }
+    for(const hydrant of hydrants) {
+      const dx=hydrant.position.x-position.x,dz=hydrant.position.z-position.z,d=Math.hypot(dx,dz);
+      if(d<2.8 && Math.abs(hydrant.position.y-position.y)<2 && (d<.6 || (dx*flat.x+dz*flat.z)/d>.3)){burstHydrant(hydrant);hits++;}
+    }
+    for(const boss of bosses) {
+      const a=boss.actor,p=a.group.position;if(boss.status!=='active')continue;
+      const dx=p.x-position.x,dz=p.z-position.z,d=Math.hypot(dx,dz);
+      if(d>(a===rhino?5.5:4.5) || Math.abs(p.y-position.y)>4 || (d>.6 && (dx*flat.x+dz*flat.z)/d<.4) || elapsed-(boss.lastSlap||-9)<.55)continue;
+      boss.lastSlap=elapsed;
+      damageBoss(a,1,a.state==='subdued'?'BOSS SMACKDOWN':'BOSS SLAP',p.clone().setY(p.y+2.5));hits++;
+      if(boss.status==='active' && a.state!=='subdued'){p.x+=flat.x*2;p.z+=flat.z*2;}
+    }
+    if(hits){impactFeedback(2+hits);playEffect('impact');if(hits>=3)awardChaos(250*hits,`MULTI-SLAP x${hits}`,null);}
+  }
+  // ---- Villains: district bosses with health bars, news alerts and a trip to jail ----
+  const bossBar=document.getElementById('boss-bar'),bossNameLabel=document.getElementById('boss-name'),bossTitleLabel=document.getElementById('boss-title'),bossHealth=document.getElementById('boss-health'),bossTag=document.getElementById('boss-tag');
+  const breaking=document.getElementById('breaking'),breakingText=document.getElementById('breaking-text'),villainTracker=document.getElementById('villain-tracker');
+  const beaconGeometry=new THREE.CylinderGeometry(2.2,2.2,300,12,1,true);
+  const alertVerbs=['IS WRECKING','IS TERRORIZING','IS HAVING A NORMAL ONE IN','IS LOOSE IN','IS RUINING BRUNCH IN','IS DOING CRIMES IN'];
+  const bosses=[
+    {actor:rhino,name:'RHINO',title:'Has never once paid for a fender bender',district:'CENTRAL PARK',color:0xff665f,hp:20,home:new THREE.Vector3(0,0,-29)},
+    {actor:villains.find(v=>v.kind==='electro'),name:'ELECTRO',title:'Stealing power from the Times Square billboards',district:'TIMES SQUARE',color:0x80eeff,hp:16},
+    {actor:villains.find(v=>v.kind==='goblin'),name:'GREEN GOBLIN',title:'Pumpkin-bombing Midtown commuters',district:'MIDTOWN',color:0xa8ff6c,hp:18},
+    {actor:villains.find(v=>v.kind==='octopus'),name:'DOC OCK',title:'Robbing Wall Street with four extra arms',district:'THE FINANCIAL DISTRICT',color:0xffc75e,hp:22}
+  ].map(def=>{
+    const beacon=new THREE.Mesh(beaconGeometry,new THREE.MeshBasicMaterial({color:def.color,transparent:true,opacity:.2,depthWrite:false,blending:THREE.AdditiveBlending,fog:false}));
+    beacon.visible=false;beacon.userData.projectile=true;beacon.raycast=()=>{};scene.add(beacon);
+    const boss={...def,home:def.home||def.actor.spawn.clone(),maxHp:def.hp,status:'dormant',beacon,timer:0,jailTime:0,rampage:3,defeats:0};
+    def.actor.boss=boss;return boss;
+  });
+  let alertTimer=25,nukeUnlocked=false,focusBoss=null;const villainsBeaten=new Set();
+  try{nukeUnlocked=localStorage.getItem('spida.nukeUnlocked')==='1';}catch(_){/* Storage can be unavailable; the unlock then lasts this session. */}
+  let breakingTimer=null;
+  function showBreaking(text) {
+    if(!breaking)return;
+    breakingText.textContent=text;breaking.hidden=false;breaking.classList.remove('show');void breaking.offsetWidth;breaking.classList.add('show');
+    clearTimeout(breakingTimer);breakingTimer=setTimeout(()=>{breaking.hidden=true;},4800);
+  }
+  function sleepBoss(boss) {
+    const a=boss.actor;boss.status='dormant';a.group.visible=false;boss.beacon.visible=false;a.group.position.copy(boss.home);a.enraged=false;
+  }
+  function activateBoss(boss,announce=true) {
+    if(boss.status!=='dormant')return;
+    const a=boss.actor;boss.status='active';boss.hp=boss.maxHp;a.group.visible=true;a.group.position.copy(boss.home);a.group.rotation.set(0,0,0);
+    a.state=a===rhino?'roam':'idle';a.timer=1;a.stuck=false;a.webHits=0;a.enraged=false;releaseActorWeb(a);
+    if(announce) {
+      showBreaking(`${boss.name} ${pick(alertVerbs)} ${boss.district}`);
+      setNews(`BREAKING: ${boss.name} SPOTTED IN ${boss.district}  •  ${boss.title.toUpperCase()}  •  NYPD "MONITORING THE SITUATION"  •  SPIDER-MENACE NOWHERE TO BE FOUND`);
+      playEffect('alert');
+    }
+    updateVillainTracker();
+  }
+  // Every third of a boss's health knocks them out briefly, which doubles the damage they take.
+  function damageBoss(actor,amount,label,point=null) {
+    const boss=actor?.boss;if(!boss || boss.status!=='active')return false;
+    const before=boss.hp,stunned=actor.state==='subdued';boss.hp=Math.max(0,boss.hp-amount*(stunned?1.5:1));focusBoss=boss;boss.lastHit=elapsed;
+    const where=point||actor.group.position.clone().setY(actor.group.position.y+3);
+    if(label)awardChaos(Math.round(amount*(stunned?240:120)),label,where,'trick');
+    burst(where,12,[boss.color,0xffffff],{speed:7,life:.45,size:.35});
+    if(boss.hp<=0){defeatBoss(boss);return true;}
+    const third=boss.maxHp/3;
+    if(!stunned && Math.ceil(boss.hp/third)<Math.ceil(before/third)) {
+      actor.state='subdued';actor.stuck=true;actor.webRemaining=3;actor.timer=0;worldPopup('STUNNED! SLAP THEM!',where,'burst trick',1.6);playEffect('impact');
+    }
+    if(!actor.enraged && boss.hp<=boss.maxHp/2){actor.enraged=true;worldPopup(`${boss.name} IS ENRAGED`,where.clone().setY(where.y+1.5),'burst oops',1.8);}
+    return true;
+  }
+  function defeatBoss(boss) {
+    const a=boss.actor,p=a.group.position;boss.status='defeated';boss.jailTime=0;boss.defeats++;villainsBeaten.add(boss.name);
+    if(webGrab===a)cancelWebGrab();clearWebPin(a);
+    a.state='subdued';a.stuck=true;a.webRemaining=1e6;
+    const wrap=wrapActor(a.group,a);if(a===rhino)wrap.scale.set(2.6,2.2,2.5);else wrap.scale.set(1.35,1.4,1.4);wrap.userData.webActor=a;splatters.push(wrap);
+    awardChaos(5000,`${boss.name} DEFEATED`,p.clone().setY(p.y+4),'hero');burst(p.clone().setY(p.y+3),70,confetti,{speed:12,up:8,life:1.8,size:.35});
+    showBreaking(`${boss.name} WEBBED UP. NYPD TAKES ALL THE CREDIT.`);setNews(`${boss.name} CAPTURED  •  SPIDER-MAN "PROBABLY HELPED"  •  CITY BILLS HIM FOR DAMAGES`);
+    playEffect('success');impactFeedback(3);adjustOpinion(12);
+    if(villainsBeaten.size===bosses.length)unlockNuke('EVERY VILLAIN BEATEN');
+    updateVillainTracker();
+  }
+  function unlockNuke(reason) {
+    if(nukeUnlocked)return;nukeUnlocked=true;
+    try{localStorage.setItem('spida.nukeUnlocked','1');}catch(_){/* Keep the unlock for this session only. */}
+    setTimeout(()=>showBreaking(`☢ NUKE UNLOCKED: ${reason}. PRESS N. PLEASE DON'T.`),2500);updateVillainTracker();
+  }
+  function updateVillainTracker() {
+    if(villainTracker)villainTracker.innerHTML=bosses.map(b=>`<span class="${villainsBeaten.has(b.name)?'beaten':b.status==='active'?'active':''}" style="--villain:#${b.color.toString(16).padStart(6,'0')}">${b.name}</span>`).join('')+
+      `<span class="nuke-state ${nukeUnlocked?'ready':''}">${nukeUnlocked?'☢ NUKE READY':`☢ LOCKED ${villainsBeaten.size}/${bosses.length}`}</span>`;
+    nukeButton.classList.toggle('locked',!nukeUnlocked);
+    nukeButton.title=nukeUnlocked?'Launch nuke':`Locked: beat every villain (${villainsBeaten.size}/${bosses.length}) or cause 250,000 chaos`;
+  }
+  function updateBosses(dt) {
+    if(nuke)return;
+    const actors=[...cars,...pedestrians.filter(n=>!n.dead)];let nearest=null,nearestDistance=170;
+    for(const boss of bosses) {
+      const a=boss.actor,p=a.group.position;
+      if(boss.status==='dormant') {
+        boss.timer=Math.max(0,boss.timer-dt);
+        if(boss.timer===0 && Math.hypot(position.x-boss.home.x,position.z-boss.home.z)<85)activateBoss(boss);
+        continue;
+      }
+      if(boss.status==='defeated') {
+        // The webbed villain floats off to jail, then comes back angrier later.
+        boss.jailTime+=dt;boss.beacon.visible=false;
+        if(boss.jailTime>3 && a.group.visible){p.y+=dt*(3+(boss.jailTime-3)*5);a.group.rotation.y+=dt*2.5;if(boss.jailTime>3.05&&boss.jailTime<3.1)worldPopup('OFF TO THE RAFT ✈',p.clone().setY(p.y+4),'burst hero',2);}
+        if(boss.jailTime>9 && a.group.visible){releaseActorWeb(a);a.stuck=false;sleepBoss(boss);boss.status='jailed';boss.timer=150;boss.maxHp=Math.round(boss.maxHp*1.3);}
+        continue;
+      }
+      if(boss.status==='jailed'){boss.timer-=dt;if(boss.timer<=0){boss.status='dormant';boss.timer=0;updateVillainTracker();}continue;}
+      const distance=Math.hypot(position.x-p.x,position.z-p.z);
+      boss.beacon.visible=distance>45;boss.beacon.position.set(p.x,150,p.z);boss.beacon.material.opacity=.14+.08*Math.sin(elapsed*4);
+      if(distance<nearestDistance){nearest=boss;nearestDistance=distance;}
+      // Left alone, a villain wrecks its neighborhood.
+      boss.rampage-=dt;
+      if(boss.rampage<=0 && distance>60) {
+        boss.rampage=3+Math.random()*3;
+        const victims=pedestrians.filter(n=>!n.dead && !n.knockback && n.group.visible && Math.hypot(n.group.position.x-p.x,n.group.position.z-p.z)<45);
+        if(victims.length){const target=pick(victims).group.position.clone();enemyFlash(target,4,a.kind==='electro');enemyBlast(target,4,actors,a.kind==='electro');}
+      }
+    }
+    alertTimer-=dt;
+    if(alertTimer<=0) {
+      alertTimer=50+Math.random()*35;
+      const sleeping=bosses.filter(b=>b.status==='dormant');
+      if(sleeping.length && bosses.filter(b=>b.status==='active').length<2)activateBoss(pick(sleeping));
+    }
+    if(focusBoss && (focusBoss.status!=='active' || elapsed-(focusBoss.lastHit||0)>8))focusBoss=null;
+    const shown=focusBoss||nearest;
+    if(bossBar) {
+      bossBar.hidden=!shown;
+      if(shown) {
+        bossNameLabel.textContent=shown.name;bossTitleLabel.textContent=shown.title;bossHealth.style.width=`${shown.hp/shown.maxHp*100}%`;
+        bossHealth.style.background=`#${shown.color.toString(16).padStart(6,'0')}`;
+        bossTag.textContent=shown.actor.state==='subdued'?'STUNNED':shown.actor.enraged?'ENRAGED':'';bossTag.className=shown.actor.state==='subdued'?'stunned':shown.actor.enraged?'enraged':'';
+      }
+    }
+  }
   function movement() {
     const strafe=(keys.right?1:0)-(keys.left?1:0), forward=(keys.forward?1:0)-(keys.back?1:0);
     return new THREE.Vector3(strafe*Math.cos(yaw)-forward*Math.sin(yaw),0,-strafe*Math.sin(yaw)-forward*Math.cos(yaw));
@@ -1895,7 +2474,7 @@
     75,null,77,78, 79,78,77,null, 75,72,70,68, 67,65,63,null,
     65,null,68,72, 70,68,65,null, 67,71,74,77, 75,72,67,null
   ];
-  let musicBus=null,effectsBus=null,effectsEnabled=true,noiseBuffer=null,footstepTime=0,ambientSoundTime=3;
+  let windGain=null,windFilter=null,musicBus=null,effectsBus=null,effectsEnabled=true,noiseBuffer=null,footstepTime=0,ambientSoundTime=3;
   const effectsToggle=document.getElementById('effects-toggle');
   effectsToggle.addEventListener('click',()=>{
     effectsEnabled=!effectsEnabled;
@@ -1914,7 +2493,8 @@
     collapse:[.6,90,38,'sawtooth',.1,.12],electric:[.2,1050,280,'square',.035,.055],
     enemy:[.17,250,480,'sawtooth',.035,.035],alert:[.25,390,600,'triangle',.045,0],
     success:[.4,550,880,'triangle',.045,0],failure:[.4,300,120,'triangle',.045,0],
-    horn:[.3,210,205,'square',.025,0],bird:[.16,1250,1900,'sine',.025,0]
+    horn:[.3,210,205,'square',.025,0],bird:[.16,1250,1900,'sine',.025,0],
+    slap:[.1,1400,380,'square',.02,.16],boing:[.45,180,620,'sine',.07,0]
   };
   function playEffect(kind,source=null) {
     if(!effectsEnabled || !soundContext || soundContext.state!=='running' || document.hidden || paused)return;
@@ -1981,6 +2561,12 @@
         effectsBus=soundContext.createGain();effectsBus.gain.value=effectsEnabled?1:0;effectsBus.connect(soundContext.destination);
         noiseBuffer=soundContext.createBuffer(1,Math.ceil(soundContext.sampleRate*.65),soundContext.sampleRate);
         const samples=noiseBuffer.getChannelData(0);for(let i=0;i<samples.length;i++)samples[i]=Math.random()*2-1;
+        // Wind rushes louder and brighter with speed.
+        const windBuffer=soundContext.createBuffer(1,soundContext.sampleRate*4,soundContext.sampleRate),wind=windBuffer.getChannelData(0);
+        let brown=0;for(let i=0;i<wind.length;i++){brown=(brown+.02*(Math.random()*2-1))/1.02;wind[i]=brown*3.5;}
+        const windSource=soundContext.createBufferSource();windSource.buffer=windBuffer;windSource.loop=true;
+        windFilter=soundContext.createBiquadFilter();windFilter.type='bandpass';windFilter.Q.value=.6;windFilter.frequency.value=300;
+        windGain=soundContext.createGain();windGain.gain.value=0;windSource.connect(windFilter);windFilter.connect(windGain);windGain.connect(effectsBus);windSource.start();
       }
       if(soundContext.state==='suspended')soundContext.resume().catch(()=>{});
       if(!musicTimer)musicTimer=setInterval(scheduleMusic,80);
@@ -2057,7 +2643,9 @@
     if(npc.dead)return;
     if(webGrab===npc)cancelWebGrab();
     clearWebPin(npc);releaseActorWeb(npc);cancelVisit(npc);cancelDonation(npc);
-    npc.dead=true;npc.knockback=null;npc.group.rotation.x=Math.PI/2;npc.group.rotation.z=0;npc.top=.65;
+    npc.dead=true;npc.reviveAt=elapsed+10+Math.random()*6;npc.knockback=null;npc.group.rotation.x=Math.PI/2;npc.group.rotation.z=0;npc.top=.65;
+    const p=npc.group.position;burst(p.clone().setY(p.y+.4),26,[0xffffff,0xd0c8bd,0xffd25e],{speed:7,up:4,life:.9,size:.5});impactFeedback(2);
+    if(!nuke)awardChaos(250,pick(['WHOOPS','PANCAKED','THAT\'S GONNA LEAVE A MARK','GRAVITY: 1, YOU: 0']),p.clone().setY(p.y+1.6),'oops');
     npc.leftArm.rotation.x=.35;npc.rightArm.rotation.x=-.35;npc.leftLeg.rotation.x=.2;npc.rightLeg.rotation.x=-.2;
     playOof(npc);
   }
@@ -2074,7 +2662,7 @@
     for(const npc of pedestrians) {
       cancelDonation(npc);npc.donationHistory?.clear();
       if(npc.cupCoins){for(const coin of npc.cupCoins)coin.removeFromParent();npc.cupCoins.length=0;}
-      npc.dead=false;npc.fearTimer=0;npc.panicFrom=null;npc.stuck=false;npc.webRemaining=0;npc.webPose=0;npc.top=npc.uprightTop;npc.visit=null;
+      npc.dead=false;npc.reviveAt=0;npc.fearTimer=0;npc.panicFrom=null;npc.stuck=false;npc.webRemaining=0;npc.webPose=0;npc.top=npc.uprightTop;npc.visit=null;
       npc.leftArm.rotation.x=npc.rightArm.rotation.x=npc.leftLeg.rotation.x=npc.rightLeg.rotation.x=0;
       npc.group.visible=true;npc.group.rotation.x=0;npc.group.rotation.z=0;
       if(npc.settled)seatedRest(npc);if(npc.rooftopKind==='view')rooftopRest(npc);if(npc.wheelchair)restoreWheelchair(npc);
@@ -2091,25 +2679,57 @@
       if(villain.glider)villain.glider.rotation.set(0,0,0);
       villain.state='idle';villain.timer=0;villain.webHits=0;villain.stuck=false;villain.webRemaining=0;villain.attacks=0;
     }
-    shockTime=0;attackImmunity=0;
+    shockTime=0;attackImmunity=0;trickSpin=0;screenShake=0;hitStop=0;
     wallContact=null;wallRunTime=0;wallCooldown=0;zipTime=0;zipCooldown=0;zipAnchor=null;
     recentDanger=null;
     if(reticle)reticle.classList.remove('active','missed','hit');
+    for(const boss of bosses){releaseActorWeb(boss.actor);boss.actor.stuck=false;boss.status='dormant';boss.timer=0;sleepBoss(boss);}alertTimer=25;focusBoss=null;updateVillainTracker();
     yaw=0; pitch=0; handBlend=0; swingPose=0; footPose=0; glideBlend=0;glideEngaged=false;glideWings.visible=false; cameraRoll=0; feedbackTime=0;runPhase=0;runBlend=0;bombAnimation=0;mapTimer=0; anchorMarker.visible=false; camera.fov=72;camera.updateProjectionMatrix();camera.position.set(0,1.7,8); camera.rotation.set(0,0,0,'YXZ');
   }
   function jump() {
-    if (rope) { playEffect('jump'); swing(false); velocity.y=Math.max(velocity.y,7); onGround=false; }
+    if (rope) {
+      // Jumping off a web is a launch: up, forward, and a barrel roll at speed.
+      const speed=Math.hypot(velocity.x,velocity.z),forward=speed>4?new THREE.Vector3(velocity.x/speed,0,velocity.z/speed):new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+      const fast=speed>22;rope.age=0;swing(false);playEffect('zip');
+      velocity.y=Math.max(velocity.y,0)+11;velocity.addScaledVector(forward,7);onGround=false;
+      if(fast){trickSpin=.0001;trickDirection=Math.random()<.5?-1:1;awardChaos(150,'WEB LAUNCH',null,'trick');}
+    }
     else if (onGround) { playEffect('jump'); velocity.y=11; onGround=false; }
     else if(wallContact) {
       playEffect('jump');velocity.x=wallContact.x*12;velocity.z=wallContact.z*12;velocity.y=11;
       wallContact=null;wallCooldown=.35;onGround=false;
     }
   }
-  // Attach only where the pointer intersects a grapple surface.
+  // Attach where the pointer meets a high enough grapple surface; otherwise fan
+  // rays ahead and above so a swing connects without pixel-perfect aim.
   function findAnchor(aimX,aimY) {
     raycaster.far=150;raycaster.setFromCamera(new THREE.Vector2(aimX,aimY),camera);
-    const hit=raycaster.intersectObjects(grappleMeshes,false)[0];
-    return hit || null;
+    const direct=raycaster.intersectObjects(grappleMeshes,false)[0];
+    if(direct && direct.point.y>position.y+3)return direct;
+    return assistAnchor(raycaster.ray.direction.clone()) || direct || null;
+  }
+  const assistUp=new THREE.Vector3(0,1,0),assistRay=new THREE.Vector3(),assistOrigin=new THREE.Vector3();let assistSide=1;
+  function assistAnchor(aim) {
+    const heading=new THREE.Vector3(aim.x,0,aim.z);
+    if(heading.lengthSq()<1e-4)heading.set(-Math.sin(yaw),0,-Math.cos(yaw));
+    heading.normalize();
+    const travel=new THREE.Vector3(velocity.x,0,velocity.z);
+    if(travel.lengthSq()>36)heading.lerp(travel.normalize(),.3).normalize();
+    assistOrigin.set(position.x,position.y+1.5,position.z);
+    let best=null,bestScore=-Infinity;
+    for(const elevation of [.55,.8,1.05,1.3])for(const turn of [0,.32,-.32,.65,-.65]) {
+      assistRay.copy(heading).applyAxisAngle(assistUp,turn).multiplyScalar(Math.cos(elevation));assistRay.y=Math.sin(elevation);
+      raycaster.set(assistOrigin,assistRay.normalize());raycaster.far=95;
+      const hit=raycaster.intersectObjects(grappleMeshes,false)[0];if(!hit)continue;
+      const rise=hit.point.y-position.y,dx=hit.point.x-position.x,dz=hit.point.z-position.z;
+      const ahead=dx*heading.x+dz*heading.z,lateral=dx*heading.z-dz*heading.x;
+      if(rise<4 || ahead<1)continue;
+      // Favor tall, forward anchors and alternate sides like hand-over-hand swinging.
+      const score=Math.min(rise,38)+Math.min(ahead,45)*.75-Math.abs(lateral)*.12+(Math.sign(lateral)===assistSide?5:0)-Math.max(0,hit.distance-70)*.5;
+      if(score>bestScore){bestScore=score;best=hit;}
+    }
+    raycaster.far=150;
+    return best;
   }
   // A quick web zip pulls toward the surface at the center of the view.
   function webZip() {
@@ -2119,11 +2739,21 @@
     if(rope)swing(false);
     const direction=hit.point.clone().sub(position.clone().add(new THREE.Vector3(0,1.3,0)));
     if(direction.lengthSq()<4)return false;
-    playEffect('zip');direction.normalize();velocity.addScaledVector(direction,28);if(onGround)velocity.y=Math.max(velocity.y,4);
+    playEffect('zip');direction.normalize();velocity.addScaledVector(direction,mutators.rocket?56:28);if(onGround)velocity.y=Math.max(velocity.y,4);
     onGround=false;zipAnchor=hit.point.clone();zipTime=.22;zipCooldown=.55;showWeb(true);flashReticle();return true;
   }
   function swing(start, aimX=0, aimY=0) {
-    if (!start) { if(rope)playEffect('release');keys.swing=false; rope=null; showWeb(false); anchorMarker.visible=false;if(reticle)reticle.classList.remove('active'); return; }
+    if (!start) {
+      if(rope) {
+        playEffect('release');
+        // Letting go on the upswing slingshots; the ground does not count.
+        if(rope.age>.35 && !onGround && velocity.y>-3) {
+          velocity.multiplyScalar(mutators.rocket?1.45:1.1);velocity.y+=mutators.rocket?12:4.5;
+          const speed=velocity.length();if(speed>28)awardChaos(Math.round(speed*2),'SLINGSHOT',null,'trick');
+        }
+      }
+      keys.swing=false; rope=null; showWeb(false); anchorMarker.visible=false;if(reticle)reticle.classList.remove('active'); return;
+    }
     if (keys.swing) return;
     if(zipTime>0)showWeb(false);zipTime=0;zipAnchor=null;keys.swing=true;
     camera.updateMatrixWorld();
@@ -2132,6 +2762,7 @@
     if (!hit) {feedbackTime=1.3;return;}
     const anchor=hit.point.clone(),localAnchor=hit.object.worldToLocal(anchor.clone());
     const hand=position.clone().add(new THREE.Vector3(0,1.3,0));
+    assistSide=Math.sign((anchor.x-position.x)*Math.cos(yaw)-(anchor.z-position.z)*Math.sin(yaw))||assistSide;
     playEffect('web');rope={anchor,anchorObject:hit.object,anchorInstance:hit.instanceId,localAnchor,anchorVelocity:new THREE.Vector3(),length:Math.max(2,hand.distanceTo(anchor)),age:0};showWeb(true);
     anchorMarker.position.copy(anchor);anchorMarker.visible=true;feedbackTime=0;
     if(reticle)reticle.classList.add('active');flashReticle();
@@ -2184,7 +2815,15 @@
     camera.rotation.set(pitch,yaw,cameraRoll,'YXZ');camera.updateMatrixWorld();scene.updateMatrixWorld(true);
     raycaster.far=150;raycaster.setFromCamera(new THREE.Vector2(aimX,aimY),camera);
     const hit=raycaster.intersectObjects(staticWebSurfaces(),true)[0];
-    if(!hit || Math.abs(hit.point.x)>258 || hit.point.z<worldMinZ || hit.point.z>worldMaxZ){feedbackTime=1.3;return;}
+    if(!hit || hit.point.x<worldMinX || hit.point.x>worldMaxX || hit.point.z<worldMinZ || hit.point.z>worldMaxZ || hit.distance>70) {
+      // No surface to stick them to: yeet them where you are looking instead.
+      const direction=raycaster.ray.direction.clone(),p=actor.group.position;
+      if(actor!==rhino && !villains.includes(actor)) {
+        throwActor(actor,direction,false,direction.multiplyScalar(cars.includes(actor)?30:42).add(new THREE.Vector3(0,9,0)));
+        playEffect('zip',p);playVoice(p,'scream');impactFeedback(1.5);awardChaos(cars.includes(actor)?600:350,cars.includes(actor)?'CAR YEET':'YEET',p.clone().setY(p.y+2));
+      } else feedbackTime=1.3;
+      return;
+    }
     const normal=surfaceNormal(hit);
     const destination=hit.point.clone(),isPerson=pedestrians.includes(actor)||actor===rhino||villains.includes(actor);
     if(normal.y>.5) {
@@ -2217,6 +2856,7 @@
     const wrap=wrapActor(actor.group,actor);if(actor===rhino)wrap.scale.set(2.6,2.2,2.5);else if(villains.includes(actor))wrap.scale.set(1.35,1.4,1.4);wrap.userData.webActor=actor;splatters.push(wrap);
     if(splatters.length>50)disposeWeb(splatters.shift());
     const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({length:9},()=>hit.point)),new THREE.LineBasicMaterial({color:0xf0ffff}));scene.add(line);
+    if(actor===rhino||villains.includes(actor))damageBoss(actor,2,'PINNED TO THE WALL');
     actor.webPinned={from:actor.group.position.clone(),destination,anchor:hit.point.clone(),line,hang,elapsed:0,duration:Math.max(.35,Math.min(1.5,actor.group.position.distanceTo(destination)/35))};
     flashReticle();
   }
@@ -2418,6 +3058,7 @@
   }
   function launchNuke() {
     if(nuke)return;
+    if(!nukeUnlocked){showBreaking(`☢ NUKE LOCKED: BEAT ${bosses.length-villainsBeaten.size} MORE VILLAINS OR CAUSE 250,000 CHAOS`);playEffect('failure');return false;}
     // The crosshair targets the nearest visible world surface, including roofs and water.
     camera.rotation.set(pitch,yaw,cameraRoll,'YXZ');camera.updateMatrixWorld();scene.updateMatrixWorld(true);
     raycaster.far=camera.far;raycaster.setFromCamera(new THREE.Vector2(0,0),camera);
@@ -2434,7 +3075,7 @@
     nuke={group,missile,target,time:0,phase:'warning',hitActors:new Set(),hitTrees:new Set(),hitDogs:new Set(),hitAircraft:new Set(),hitDistant:new Set(),distantFlights:[],distantBatches:new Map(),trees:[],flights:[],specials:[],fallingBuildings:[],debris:[],actorOrigins,playerHit:false};nukeButton.disabled=true;playNukeMusic();
   }
   function detonateNuke() {
-    playNukeBoom();
+    playNukeBoom();awardChaos(1000000,'WAR CRIMES',null,'oops');adjustOpinion(-100);
     nuke.phase='blast';nuke.time=0;nuke.missile.visible=false;scene.updateMatrixWorld(true);
     const cloud=new THREE.Group();cloud.position.copy(nuke.target);nuke.group.add(cloud);nuke.cloud=cloud;
     const canvas=document.createElement('canvas');canvas.width=canvas.height=128;
@@ -2627,19 +3268,12 @@
     let mark;
     if(owner && owner.userData.actor) {
       const actor=owner.userData.actor,wasWebbed=actor.stuck;if(actor.dead)return;mark=wrapActor(owner,actor);mark.userData.webActor=actor;
-      if(actor===rhino) {
-        mark.scale.set(2.6,2.2,2.5);
-        actor.webHits=Math.min(8,actor.webHits+1);
-        if(actor.webHits>=8){actor.stuck=true;actor.state='subdued';actor.webRemaining=18;actor.timer=0;}
-        else if(actor.state!=='charge'){actor.state='stagger';actor.timer=.3;}
+      if(actor===rhino || villains.includes(actor)) {
+        if(actor===rhino)mark.scale.set(2.6,2.2,2.5);else mark.scale.set(1.35,1.4,1.4);
+        damageBoss(actor,1,'WEB SHOT',hit.point);
+        if(actor.boss?.status==='active' && actor.state!=='subdued' && actor.state!=='charge' && actor.state!=='windup' && actor.state!=='dive'){actor.state='stagger';actor.timer=.25;}
       }
-      else if(villains.includes(actor)) {
-        mark.scale.set(1.35,1.4,1.4);actor.webHits++;
-        const required=actor.kind==='electro'?5:actor.kind==='goblin'?6:7;
-        if(actor.webHits>=required){actor.stuck=true;actor.state='subdued';actor.webRemaining=15;actor.timer=0;}
-        else if(actor.state!=='windup'){actor.state='stagger';actor.timer=.25;}
-      }
-      else if(pedestrians.includes(actor)) {actor.stuck=true;cancelVisit(actor);cancelDonation(actor);actor.webRemaining=15;}
+      else if(pedestrians.includes(actor)) {if(!wasWebbed){awardChaos(80,'GIFT WRAPPED',hit.point);say(actor,'webbed',.6);}actor.stuck=true;cancelVisit(actor);cancelDonation(actor);actor.webRemaining=15;}
       else if(cars.includes(actor)) {
         actor.stuck=true;
         actor.webRemaining=10;
@@ -2689,7 +3323,26 @@
       const p=actor.group.position;
       const base=actorFloor(actor),top=base+actor.top;
       if(actor.dead || !actor.group.visible || !overlaps(position.x,position.z,.38,.38,actor) || position.y>=top || position.y+1.8<=base) continue;
+      const person=pedestrians.includes(actor),horizontal=Math.hypot(velocity.x,velocity.z);
+      if(person && !actor.knockback && !actor.webHeld && !actor.webPinned && previous.y>=top-.3 && velocity.y<-8) {
+        // Landing on someone from height is a stomp: they go flying, you bounce.
+        const away=new THREE.Vector3(p.x-position.x,0,p.z-position.z);if(away.lengthSq()<.01)away.set(Math.random()-.5,0,Math.random()-.5);away.normalize();
+        throwActor(actor,away,false,away.multiplyScalar(9).add(new THREE.Vector3(0,6+Math.min(12,-velocity.y*.4),0)));
+        velocity.y=13;onGround=false;playVoice(p,'grunt');playEffect('impact',p);impactFeedback(2.5);
+        burst(p.clone().setY(top),18,[0xfff2a8,0xffffff],{speed:8,up:2,life:.4,size:.3});awardChaos(300,'GOOMBA STOMP',p.clone().setY(top+1));say(actor,'hit',.6);continue;
+      }
       if(previous.y>=top && velocity.y<=0) {position.y=top;velocity.y=0;onGround=true;continue;}
+      const fast=person?horizontal>7.5 || (!onGround && velocity.length()>10):cars.includes(actor) && horizontal>28;
+      if(fast && !actor.knockback && !actor.webHeld && !actor.webPinned) {
+        // Goat rules: anything you run into at speed goes flying.
+        const launch=velocity.clone().multiplyScalar(person?1.15:.55);launch.y=Math.max(launch.y,0)+(person?7+horizontal*.18:9);
+        throwActor(actor,null,false,launch);velocity.multiplyScalar(person?.85:.6);
+        const hitPoint=p.clone().setY(base+1.3);burst(hitPoint,14,[0xfff2a8,0xffffff],{speed:8,up:2,life:.4,size:.3});
+        playEffect('impact',p);impactFeedback(1+horizontal/18);
+        if(person){playVoice(p,'yelp');say(actor,'hit',.55);awardChaos(Math.round(60+horizontal*8),onGround?pick(['BODY CHECK','SHOULDER BARGE','EXCUSE ME']):pick(['SPIDER-TACKLE','DROP-IN','AIRMAIL']),hitPoint);}
+        else awardChaos(500,'CAR CHECK',hitPoint);
+        continue;
+      }
       const penetrationX=actor.hx+.38-Math.abs(position.x-p.x);
       const penetrationZ=actor.hz+.38-Math.abs(position.z-p.z);
       if(penetrationX<penetrationZ) {
@@ -2902,7 +3555,7 @@
     car.currentSpeed+=THREE.MathUtils.clamp(targetSpeed-car.currentSpeed,-acceleration*dt,acceleration*dt);
     p.x+=THREE.MathUtils.clamp(car.laneTarget-p.x,-2.8*dt,2.8*dt);
     p.z-=car.currentSpeed*dt;
-    if(car.suburban){if(p.z<worldMinZ)p.z=-240;}else if(p.z< -258)p.z=worldMaxZ;
+    if(p.z<car.minZ)p.z=car.maxZ;
     if(actorBlocked(car,oldX,oldZ,actors)){p.x=oldX;p.z=oldZ;car.currentSpeed=0;}
     car.lateralSpeed=dt>0?(p.x-oldX)/dt:0;
   }
@@ -2948,7 +3601,7 @@
         }
         const p=actor.curvedRoute.getPointAt(actor.routeProgress);actor.group.position.set(p.x,0,p.z);
       }
-      actor.roadX=THREE.MathUtils.clamp(Math.round(actor.group.position.x/40)*40,-240,240);
+      actor.roadX=THREE.MathUtils.clamp(Math.round(actor.group.position.x/40)*40,actor.roadMin,actor.roadMax);
       actor.preferredLane=actor.roadX+(actor.group.position.x>=actor.roadX?2:-2);
       actor.laneTarget=actor.preferredLane;actor.currentSpeed=0;actor.lateralSpeed=0;actor.laneCooldown=1;
     } else if(pedestrians.includes(actor)) {
@@ -2958,8 +3611,15 @@
       actor.pause=1;
     }
   }
-  function throwActor(actor,direction,lethal=false) {
+  function throwActor(actor,direction,lethal=false,launch=null) {
     if(actor.dead || actor.knockback || actor.webHeld || actor.webPinned || !actor.group.visible)return;
+    if(launch){
+      if(pedestrians.includes(actor)){cancelVisit(actor);cancelDonation(actor);}
+      if(actor.stuck)releaseActorWeb(actor);
+      if(cars.includes(actor) && actor.waiting){cancelVisit(actor.waiting);actor.waiting=null;}
+      actor.knockback={ground:actor.group.position.y,velocity:launch.clone(),spin:(Math.random()>.5?1:-1)*(5+launch.length()*.15),time:0,lethal,fromPlayer:true,bounces:0,chain:0};
+      actor.group.position.y+=.08;if(pedestrians.includes(actor) && launch.length()>18)say(actor,'fly',.35);return;
+    }
     if(pedestrians.includes(actor)){cancelVisit(actor);cancelDonation(actor);}
     if(cars.includes(actor) && actor.waiting){cancelVisit(actor.waiting);actor.waiting=null;}
     actor.knockback={ground:actor.group.position.y,velocity:new THREE.Vector3(direction.x*31,15,direction.z*31),spin:(random(elapsed+actor.seed)>.5?1:-1)*6,time:0,lethal};
@@ -2976,26 +3636,70 @@
       return true;
     }
     const p=actor.group.position,oldX=p.x,oldZ=p.z;
-    flight.time+=dt;flight.velocity.y-=(flight.rescue?4:22)*dt;p.addScaledVector(flight.velocity,dt);
+    if(flight.splat>0) {
+      // Cartoon wall splat: stick spread-eagled, then peel off and slide down.
+      flight.splat-=dt;if(flight.splat>0){if(pedestrians.includes(actor)){actor.leftArm.rotation.x=actor.rightArm.rotation.x=-2.7;actor.leftLeg.rotation.x=.25;actor.rightLeg.rotation.x=-.25;}return true;}
+      flight.velocity.set(0,-1,0);flight.spin=.6;
+    }
+    flight.time+=dt;flight.velocity.y-=(flight.rescue?4:22)*gravityScale*dt;p.addScaledVector(flight.velocity,dt);
+    const flightSpeed=Math.hypot(flight.velocity.x,flight.velocity.z);
+    if(flight.fromPlayer && !flight.hitBoss && flightSpeed>9) {
+      // Anything you throw at a villain counts as an attack.
+      for(const boss of bosses) {
+        const q=boss.actor.group.position;if(boss.status!=='active' || boss.actor===actor)continue;
+        if(Math.hypot(q.x-p.x,q.z-p.z)<(boss.actor===rhino?3.2:2.2) && p.y>q.y-1 && p.y<q.y+(boss.actor===rhino?4.5:3)) {
+          flight.hitBoss=true;flight.velocity.multiplyScalar(-.3);playEffect('impact',q);impactFeedback(2.5);
+          damageBoss(boss.actor,cars.includes(actor)?4:3,cars.includes(actor)?'CAR MISSILE':pedestrians.includes(actor)?'HUMAN MISSILE':'PROP MISSILE',q.clone().setY(q.y+3));
+        }
+      }
+    }
+    if(flight.fromPlayer && flightSpeed>11 && pedestrians.includes(actor)) {
+      // Flying people bowl over anyone they hit.
+      for(const other of pedestrians) {
+        if(other===actor || other.dead || other.knockback || other.webHeld || other.webPinned || !other.group.visible)continue;
+        const q=other.group.position;if(Math.abs(q.x-p.x)>1 || Math.abs(q.z-p.z)>1 || p.y-q.y>2.2 || q.y-p.y>1)continue;
+        throwActor(other,null,false,flight.velocity.clone().multiplyScalar(.75).add(new THREE.Vector3(0,7,0)));
+        if(other.knockback)other.knockback.chain=(flight.chain||0)+1;
+        flight.velocity.multiplyScalar(.7);flight.chain=(flight.chain||0)+1;
+        playVoice(q,'yelp');burst(q.clone().setY(q.y+1.2),10,[0xfff2a8,0xffffff],{speed:7,life:.35,size:.25});
+        awardChaos(flight.chain>=3?600:200,flight.chain>=3?'STRIKE!':'HUMAN BOWLING',q.clone().setY(q.y+2));
+      }
+    }
     const water=waterAt(p.x,p.z);
     if(water){flight.ground=water.floor;if(p.y<water.surface+.2){flight.velocity.x*=Math.exp(-2.5*dt);flight.velocity.z*=Math.exp(-2.5*dt);flight.spin*=Math.exp(-2*dt);}}
     for(const b of buildings) {
       if(b.destroyed)continue;
       if(p.y>b.height || (b.shape?!insideBuilding(p.x,p.z,b,Math.max(actor.hx,actor.hz)):(Math.abs(p.x-b.x)>=b.w/2+actor.hx || Math.abs(p.z-b.z)>=b.d/2+actor.hz)))continue;
       if(b.shape && !insideBuilding(oldX,oldZ,b,Math.max(actor.hx,actor.hz))){p.x=oldX;p.z=oldZ;flight.velocity.x*=-.35;flight.velocity.z*=-.35;continue;}
-      if(Math.abs(oldX-b.x)>=b.w/2+actor.hx){p.x=oldX;flight.velocity.x*=-.35;}
-      if(Math.abs(oldZ-b.z)>=b.d/2+actor.hz){p.z=oldZ;flight.velocity.z*=-.35;}
+      const hitX=Math.abs(oldX-b.x)>=b.w/2+actor.hx,hitZ=Math.abs(oldZ-b.z)>=b.d/2+actor.hz;
+      if(flight.fromPlayer && !flight.splatted && flightSpeed>13 && (hitX||hitZ) && pedestrians.includes(actor)) {
+        flight.splatted=true;flight.splat=1.1;p.x=oldX;p.z=oldZ;
+        actor.group.rotation.set(0,hitX?(oldX<b.x?-Math.PI/2:Math.PI/2):(oldZ<b.z?0:Math.PI),0);
+        playEffect('splat',p);playVoice(p,'grunt');burst(p.clone().setY(p.y+1.2),16,[0xffffff,0xd8d0c4],{speed:5,life:.5,size:.4});
+        awardChaos(350,'WALL SPLAT',p.clone().setY(p.y+2.4));say(actor,'hit',.7);continue;
+      }
+      if(hitX){p.x=oldX;flight.velocity.x*=-.35;}
+      if(hitZ){p.z=oldZ;flight.velocity.z*=-.35;}
     }
-    p.x=THREE.MathUtils.clamp(p.x,-258,258);p.z=THREE.MathUtils.clamp(p.z,worldMinZ,worldMaxZ);
+    p.x=THREE.MathUtils.clamp(p.x,worldMinX,worldMaxX);p.z=THREE.MathUtils.clamp(p.z,worldMinZ,worldMaxZ);
     actor.group.rotation.x+=flight.spin*dt;actor.group.rotation.z+=flight.spin*.6*dt;
     if(pedestrians.includes(actor)) {
       actor.leftArm.rotation.x=Math.sin(flight.time*10)*1.3;actor.rightArm.rotation.x=-actor.leftArm.rotation.x;
       actor.leftLeg.rotation.x=Math.sin(flight.time*9)*.9;actor.rightLeg.rotation.x=-actor.leftLeg.rotation.x;
     }
     if(p.y<=flight.ground && flight.velocity.y<0) {
+      if(flight.velocity.y<-9 && (flight.bounces||0)<2 && !flight.lethal) {
+        // Bounce a couple of times before settling.
+        p.y=flight.ground+.02;flight.velocity.y*=-.38;flight.velocity.x*=.6;flight.velocity.z*=.6;flight.bounces=(flight.bounces||0)+1;flight.spin*=.6;
+        playEffect('land',p);burst(p.clone().setY(p.y+.2),8,0xcfc7b8,{speed:3,up:1.5,life:.6,gravity:2,size:.6});
+        if(pedestrians.includes(actor))playVoice(p,'grunt');return true;
+      }
       if(pedestrians.includes(actor)) {
         p.y=flight.ground;
+        if(flight.fromPlayer && flight.time>1.2)awardChaos(Math.round(flight.time*120),`AIRTIME ${flight.time.toFixed(1)}s`,p.clone().setY(p.y+1.5));
+        if(water)burst(p.clone().setY(water.surface+.1),24,[0xd8f4ff,0x8fd1e8],{speed:6,up:7,life:.9,size:.35});
         if(flight.lethal){civilianCasualty(actor);return true;}
+        if(flight.fromPlayer)say(actor,'land',.5);
         flight.phase='down';flight.remaining=6;
         actor.group.rotation.set(Math.PI/2,actor.group.rotation.y,0);actor.top=.65;
         actor.leftArm.rotation.x=.35;actor.rightArm.rotation.x=-.35;
@@ -3045,11 +3749,11 @@
       success=Boolean((actor.webPinned && actor.webPinned.elapsed>=actor.webPinned.duration) || (actor.stuck && !actor.webPinned && actor.currentSpeed<1));
       failed=event.time>20 || event.hits.size>=2;
     }
-    if(success||failed){playEffect(success?'success':'failure');event.result=success?'success':'failed';event.time=0;event.marker.material.color.setHex(success?0x75ed9d:0xd65b50);}
+    if(success||failed){const where=actor.group.position.clone().setY(actor.group.position.y+2.5);if(success){awardChaos(event.type==='fall'?800:600,'HERO MOMENT',where,'hero');burst(where,40,confetti,{speed:9,up:6,life:1.4,size:.3});if(event.type==='fall')say(actor,'saved');}else awardChaos(400,event.type==='fall'?'MORAL FLEXIBILITY':'NOT MY PROBLEM',where,'oops');playEffect(success?'success':'failure');event.result=success?'success':'failed';event.time=0;event.marker.material.color.setHex(success?0x75ed9d:0xd65b50);}
   }
   function updateRunaway(car,actors,dt) {
     const p=car.group.position,oldZ=p.z;car.currentSpeed=Math.min(22,car.currentSpeed+4*dt);p.z-=car.currentSpeed*dt;
-    if(p.z<worldMinZ)p.z=worldMaxZ;
+    if(p.z<car.minZ)p.z=car.maxZ;
     for(const actor of actors) {
       if(actor===car || !pedestrians.includes(actor) || !actor.group.visible || actor.rooftop || rescue.hits.has(actor))continue;
       const q=actor.group.position;
@@ -3059,6 +3763,7 @@
     }
   }
   function updateRhino(dt,actors) {
+    if(rhino.boss.status!=='active')return;
     if(nuke?.hitActors.has(rhino) || rhino.webHeld || updateWebPin(rhino,dt) || updateKnockback(rhino,dt))return;
     const p=rhino.group.position;
     if(rhino.state==='subdued') {
@@ -3066,7 +3771,7 @@
       if(rhino.webRemaining<=0){releaseActorWeb(rhino);rhino.webHits=0;rhino.state='recover';rhino.timer=2;}
       return;
     }
-    rhino.timer-=dt;
+    rhino.timer-=dt*(rhino.enraged?1.6:1);
     if(rhino.state==='stagger'||rhino.state==='recover') {
       rhino.body.rotation.x+=(0-rhino.body.rotation.x)*(1-Math.exp(-5*dt));
       for(const limb of [...rhino.arms,...rhino.legs])limb.rotation.x*=Math.exp(-6*dt);
@@ -3096,10 +3801,10 @@
       return;
     }
     if(rhino.state==='charge') {
-      const old=p.clone();p.addScaledVector(rhino.direction,30*dt);
+      const old=p.clone();p.addScaledVector(rhino.direction,(rhino.enraged?40:30)*dt);
       let obstruction=buildings.find(b=>insideBuilding(p.x,p.z,b,1.1));
       if(obstruction?.parts){damageBuilding(obstruction,5);obstruction=null;}
-      const blocked=p.x< -258||p.x>258||p.z<worldMinZ||p.z>worldMaxZ||Boolean(obstruction);
+      const blocked=p.x<worldMinX||p.x>worldMaxX||p.z<worldMinZ||p.z>worldMaxZ||Boolean(waterAt(p.x,p.z))||Boolean(obstruction);
       if(blocked){p.copy(old);rhino.state='recover';rhino.timer=2;}
       const stride=Math.sin(elapsed*17);
       rhino.body.rotation.x=.38;rhino.arms[0].rotation.x=stride*.5-.5;rhino.arms[1].rotation.x=-stride*.5-.5;
@@ -3179,6 +3884,7 @@
   }
   function updateVillains(dt,actors) {
     for(const villain of villains) {
+      if(villain.boss.status!=='active')continue;
       if(nuke?.hitActors.has(villain) || villain.webHeld || updateWebPin(villain,dt) || updateKnockback(villain,dt))continue;
       const p=villain.group.position;
       if(villain.state==='subdued') {
@@ -3186,7 +3892,7 @@
         if(villain.webRemaining<=0){releaseActorWeb(villain);villain.webHits=0;villain.state='cooldown';villain.timer=2;villain.body.rotation.z=0;}
         continue;
       }
-      villain.timer=Math.max(0,villain.timer-dt);
+      villain.timer=Math.max(0,villain.timer-dt*(villain.enraged?1.7:1));
       const oldPosition=p.clone();
       if(villain.kind==='goblin') {
         const t=elapsed*.32;
@@ -3219,7 +3925,7 @@
         if(distance>stop&&distance<70&&position.y<25&&villain.state!=='windup'&&villain.state!=='stagger') {
           const oldX=p.x,oldZ=p.z;p.x+=dx/distance*3.4*dt;p.z+=dz/distance*3.4*dt;
           if(buildings.some(b=>insideBuilding(p.x,p.z,b,.7))){p.x=oldX;p.z=oldZ;}
-          p.x=THREE.MathUtils.clamp(p.x,-258,258);p.z=THREE.MathUtils.clamp(p.z,worldMinZ,worldMaxZ);
+          p.x=THREE.MathUtils.clamp(p.x,worldMinX,worldMaxX);p.z=THREE.MathUtils.clamp(p.z,worldMinZ,worldMaxZ);
         }
       }
       const dx=position.x-p.x,dz=position.z-p.z,distance=Math.hypot(dx,dz);
@@ -3309,7 +4015,7 @@
     const oldX=p.x,oldZ=p.z,step=npc.speed*(npc.wheelchair?1.35:2.1)*dt;
     const candidates=[[dx/length,dz/length],[-dz/length,dx/length],[dz/length,-dx/length]];
     for(const [vx,vz] of candidates) {
-      p.x=THREE.MathUtils.clamp(oldX+vx*step,-257,257);p.z=THREE.MathUtils.clamp(oldZ+vz*step,worldMinZ+1,worldMaxZ-1);
+      p.x=THREE.MathUtils.clamp(oldX+vx*step,worldMinX+1,worldMaxX-1);p.z=THREE.MathUtils.clamp(oldZ+vz*step,worldMinZ+1,worldMaxZ-1);
       const local=buildingCells.get(`${Math.floor(p.x/40)},${Math.floor(p.z/40)}`)||[];
       if((!waterAt(oldX,oldZ) && waterAt(p.x,p.z)) || local.some(b=>insideBuilding(p.x,p.z,b,Math.max(npc.hx,npc.hz))&&!insideBuilding(oldX,oldZ,b,Math.max(npc.hx,npc.hz))) || actorBlocked(npc,oldX,oldZ,nearby))continue;
       if(npc.parkWalker && inPark(p.x,p.z))p.y=waterAt(p.x,p.z)?.floor ?? .1+parkElevation(p.x,p.z);
@@ -3353,7 +4059,11 @@
     grid=actorGrid(actors);
     for(const npc of pedestrians) {
       if(nuke?.hitActors.has(npc))continue;
-      if(npc.dead)continue;
+      if(npc.dead) {
+        // Cartoon rules: the flattened get back up eventually.
+        if(npc.reviveAt && elapsed>npc.reviveAt && !nuke){npc.dead=false;npc.reviveAt=0;npc.knockback={ground:npc.group.position.y};recoverKnockback(npc);say(npc,'revive');}
+        continue;
+      }
       if(npc.webHeld || updateWebPin(npc,dt))continue;
       if(updateKnockback(npc,dt))continue;
       if(updateWebbedPedestrian(npc,dt))continue;
@@ -3413,7 +4123,7 @@
         npc.head.rotation.y=Math.sin(elapsed*.65+npc.seed)*.08;
       }
     }
-    updateDogs(dt);
+    updateDogs(dt);updateLandmarks(dt);
     for(const bird of birds) {
       const t=elapsed*.28+bird.phase;
       bird.group.position.set(-30+Math.sin(t)*bird.radius,bird.height+Math.sin(t*2)*.7,bird.centerZ+Math.cos(t)*bird.radius);
@@ -3463,7 +4173,8 @@
       if(!rope.anchorVelocity)rope.anchorVelocity=new THREE.Vector3();
       rope.anchorVelocity.copy(anchorEnd).sub(anchorStart).multiplyScalar(dt>0?1/dt:0);
     }
-    const frameStart=position.clone(),wasGrounded=onGround,wasGliding=glideEngaged,input=movement();
+    const frameStart=position.clone(),wasGrounded=onGround,wasGliding=glideEngaged,input=movement(),fallSpeed=-velocity.y;
+    updateChaos(dt);updateParticles(dt);updateBosses(dt);updateActivities(dt);slapCooldown=Math.max(0,slapCooldown-dt);slapAnimation=Math.max(0,slapAnimation-dt);screenShake=Math.max(0,screenShake-dt*2.5);updateMutators(dt);
     if(input.lengthSq())input.normalize();
     // Solve the swing in small steps so arcs and reeling stay stable at different frame rates.
     const steps=Math.max(1,Math.ceil(dt/(1/120))),step=dt/steps;
@@ -3496,13 +4207,18 @@
       }
       const control=(onGround?(keys.sprint?64:32):rope?18:gliding?18:12)*(shockTime>0?.35:1)*(wading?.45:1);
       velocity.addScaledVector(steering,control*step);
-      const drag=Math.exp(-(wading?5:onGround?4:rope?.025:gliding?0:.08)*step);
+      const drag=Math.exp(-(wading?5:onGround?4:rope?.05:gliding?0:.08)*step);
       velocity.x*=drag;velocity.z*=drag;
       if(onGround) {
         const horizontal=Math.hypot(velocity.x,velocity.z),limit=wading?3.5:keys.sprint?18:9;
         if(horizontal>limit){velocity.x*=limit/horizontal;velocity.z*=limit/horizontal;}
       }
-      velocity.y-=18*step;
+      velocity.y-=(rope?24:18)*gravityScale*step;
+      if(rope && keys.forward) {
+        // Pumping on the downswing and through the bottom of the arc adds speed.
+        const below=rope.anchor.y-position.y-1.3,relative=velocity.clone().sub(rope.anchorVelocity),speed=relative.length();
+        if(below>rope.length*.35 && speed>3 && speed<42 && relative.y<1)velocity.addScaledVector(relative,7*step*Math.min(1,below/Math.max(rope.length,1)*1.3)/speed);
+      }
       if(gliding) {
         // Lift acts perpendicular to the airflow; drag opposes it. Looking down
         // reduces angle of attack to trade altitude for speed, while pulling up
@@ -3540,7 +4256,8 @@
         const proximity=THREE.MathUtils.clamp((25-position.y)/20,0,1);
         const reelBlend=THREE.MathUtils.smoothstep(rope.age,0,.45);
         const automatic=rope.anchor.y>position.y+.5?Math.min(18*danger*proximity*reelBlend*step,Math.max(0,oldLength-safeLength)):0;
-        const reelAmount=Math.min(Math.max(automatic,keys.sprint?6*step:0),Math.max(0,oldLength-2));
+        const tug=rope.age<.25 && !onGround?10*step:0;
+        const reelAmount=Math.min(Math.max(automatic,tug,keys.sprint?9*step:0),Math.max(0,oldLength-2));
         rope.length-=reelAmount;
         if(length>0) {
           const normal=offset.multiplyScalar(1/length);
@@ -3561,7 +4278,7 @@
         }
       }
       const speed=velocity.length();
-      if(!onGround && speed>(gliding?75:55))velocity.multiplyScalar((gliding?75:55)/speed);
+      const cap=gliding?72:50;if(!onGround && speed>cap)velocity.multiplyScalar(cap/speed);
       onGround=false;
       const wet=waterAt(position.x,position.z),groundHeight=wet?wet.floor:parkElevation(position.x,position.z);
       if(position.y<=groundHeight){position.y=groundHeight;velocity.y=Math.max(0,velocity.y);onGround=true;}
@@ -3595,10 +4312,21 @@
       }
       resolvePlayerActors();
       if(onGround){wallRunTime=0;wallContact=null;}
-      position.x=THREE.MathUtils.clamp(position.x,-258,258);position.z=THREE.MathUtils.clamp(position.z,worldMinZ,worldMaxZ);
+      position.x=THREE.MathUtils.clamp(position.x,worldMinX,worldMaxX);position.z=THREE.MathUtils.clamp(position.z,worldMinZ,worldMaxZ);
     }
     if(!wasGliding && glideEngaged)playEffect('glide');
-    if(!wasGrounded && onGround && previous.y-position.y>.01)playEffect('land');
+    if(!wasGrounded && onGround && previous.y-position.y>.01) {
+      playEffect('land');
+      if(fallSpeed>20) {
+        // Heavy landings kick up dust and shake the camera.
+        impactFeedback(fallSpeed/14);playEffect('impact');burst(position.clone().setY(position.y+.2),30,[0xd8d0c4,0xb8b0a4],{speed:9,up:2,life:.9,gravity:3,size:.9,drag:3});
+        if(fallSpeed>32)awardChaos(Math.round(fallSpeed*6),'SUPERHERO LANDING',null,'trick');
+        for(const npc of pedestrians) {
+          const q=npc.group.position,d=Math.hypot(q.x-position.x,q.z-position.z);
+          if(d<7 && Math.abs(q.y-position.y)<2 && !npc.dead) {const away=new THREE.Vector3(q.x-position.x,0,q.z-position.z).normalize();throwActor(npc,away,false,away.multiplyScalar(14-d).add(new THREE.Vector3(0,8,0)));say(npc,'hit',.4);}
+        }
+      }
+    }
     ambientSoundTime-=dt;
     if(ambientSoundTime<=0) {
       ambientSoundTime=4+Math.random()*5;
@@ -3613,7 +4341,7 @@
     }
     distance+=position.distanceTo(frameStart);
     const speed=Math.hypot(velocity.x,velocity.z);
-    updateSceneDetail();
+    updateSceneDetail();updateCityLod(dt);
     const playerWater=waterAt(position.x,position.z);
     wadeRipple.visible=Boolean(playerWater && position.y<playerWater.surface+.25);
     if(wadeRipple.visible){wadeRipple.position.set(position.x,playerWater.surface+.015,position.z);wadeRipple.scale.setScalar(1+Math.min(speed/10,.5)+.08*Math.sin(elapsed*5));}
@@ -3621,11 +4349,24 @@
     const bob=onGround?Math.sin(elapsed*(8+speed*.2))*Math.min(speed/18,1)*.045:0;
     const lateral=velocity.x*Math.cos(yaw)-velocity.z*Math.sin(yaw);
     const blastShake=nuke?.phase==='blast'?Math.max(0,1-nuke.time/5):0;
-    const targetRoll=(onGround?-lateral*.0015:THREE.MathUtils.clamp(-lateral*.0035,-.095,.095)) + Math.sin(elapsed*14)*Math.min(playerImpact,1)*.24+Math.sin(elapsed*19)*blastShake*.07;
+    let ropeLean=0;
+    if(rope) {
+      // Lean the view toward the web anchor, more as the swing speeds up.
+      const ax=rope.anchor.x-position.x,az=rope.anchor.z-position.z,side=ax*Math.cos(yaw)-az*Math.sin(yaw);
+      ropeLean=-THREE.MathUtils.clamp(side/Math.max(8,Math.hypot(ax,az)),-1,1)*.16*Math.min(1,velocity.length()/25);
+    }
+    const targetRoll=(onGround?-lateral*.0015:THREE.MathUtils.clamp(-lateral*.0035,-.095,.095))+ropeLean + Math.sin(elapsed*14)*Math.min(playerImpact,1)*.24+Math.sin(elapsed*19)*blastShake*.07;
     cameraRoll+=(targetRoll-cameraRoll)*(1-Math.exp(-4*dt));
-    const targetFov=72+Math.min(speed/38,1)*9+(rope?2:0);
+    const targetFov=72+Math.min(velocity.length()/52,1)*18+(rope?3:0)-(slowMotion?6:0);
     camera.fov+=(targetFov-camera.fov)*(1-Math.exp(-3*dt));camera.updateProjectionMatrix();
-    camera.position.set(position.x,position.y+1.7+bob,position.z); camera.rotation.set(pitch,yaw,cameraRoll,'YXZ');
+    let spinRoll=0;
+    if(trickSpin>0) {
+      // A barrel roll after a web launch.
+      trickSpin+=dt/.7;if(trickSpin>=1||onGround)trickSpin=0;
+      const t=trickSpin;spinRoll=trickDirection*Math.PI*2*(t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2);
+    }
+    const shake=screenShake*screenShake*.35;
+    camera.position.set(position.x+(Math.random()-.5)*shake,position.y+1.7+bob+(Math.random()-.5)*shake,position.z+(Math.random()-.5)*shake); camera.rotation.set(pitch,yaw,cameraRoll+spinRoll,'YXZ');
     handBlend+=(Number(Boolean(rope||webGrab||zipTime))-handBlend)*(1-Math.exp(-9*dt));
     const sway=Math.sin(elapsed*7)*Math.min(speed/25,1)*.025;
     const running=onGround&&!rope&&!webGrab?Math.min(speed/9,1):0;
@@ -3638,6 +4379,11 @@
     rightHand.rotation.set(-handBlend*.28+velocity.y*.002-stride*.20-shot*.32,shot*.08,handBlend*.12-cameraRoll*.5-stride*.07);
     leftHand.position.set(-.47+sway+stride*.035,-.59+bob*1.5+(rope?.06:0)-stride*.10+lift*.025,-1.0-stride*.13);
     leftHand.rotation.set((rope?-.2:0)+stride*.20,0,-cameraRoll*.5+stride*.07);
+    if(slapAnimation>0) {
+      // Backhand sweep across the view.
+      const t=1-slapAnimation/.3,swingArc=Math.sin(Math.PI*t);
+      leftHand.position.x+=.75*t-.15;leftHand.position.y+=.25*swingArc;leftHand.position.z-=.35*swingArc;leftHand.rotation.z-=1.1*swingArc;leftHand.rotation.y-=.6*swingArc;
+    }
     const glideActive=glideEngaged && !onGround && !rope && !webGrab && !(nuke?.phase==='blast'&&nuke.playerHit);
     glideBlend+=(Number(glideActive)-glideBlend)*(1-Math.exp(-(glideActive?7:12)*dt));
     glideWings.visible=glideBlend>.02;wingFilm.opacity=.13*glideBlend;wingThread.opacity=.65*glideBlend;
@@ -3714,25 +4460,38 @@
         coords.needsUpdate=true;line.geometry.computeBoundingSphere();
       });
     }
+    if(webRibbon.visible)updateWebRibbon();
+    previewTimer-=dt;
+    if(rope||webGrab||zipTime>0){anchorPreview.visible=false;}
+    else if(previewTimer<=0) {
+      previewTimer=.1;camera.updateMatrixWorld();const hit=findAnchor(0,0);
+      anchorPreview.visible=Boolean(hit);if(hit)anchorPreview.position.copy(hit.point);reticle?.classList.toggle('targeted',Boolean(hit));
+    }
+    if(windGain) {
+      const rush=THREE.MathUtils.smoothstep(velocity.length(),8,62);
+      windGain.gain.setTargetAtTime(rush*.28,soundContext.currentTime,.12);windFilter.frequency.setTargetAtTime(220+rush*1300,soundContext.currentTime,.12);
+    }
+    updatePopups(dt);updateSpeedLines(dt,velocity.length());
     if(reticle) {reticle.classList.toggle('active',Boolean(rope||webGrab));reticle.classList.toggle('missed',feedbackTime>0);}
     sky.position.copy(camera.position);sky.material.uniforms.altitude.value=position.y; sun.position.set(position.x-60,position.y+100,position.z+40); sun.target.position.copy(position); sun.target.updateMatrixWorld();
   }
   // A cached north-up city map, with only moving markers redrawn each frame.
   const minimap=document.getElementById('minimap'),mapContext=minimap.getContext('2d');
-  const mapBase=document.createElement('canvas');mapBase.width=320;mapBase.height=Math.ceil((worldMaxZ-worldMinZ)*320/516);
-  const mapPaint=mapBase.getContext('2d'),mapScale=320/516;
-  const mapX=x=>(x+258)*mapScale, mapY=z=>(z-worldMinZ)*mapScale;
-  mapPaint.fillStyle='#34434a';mapPaint.fillRect(0,0,mapBase.width,mapBase.height);
-  mapPaint.fillStyle='#496d52';mapPaint.fillRect(mapX(suburbBounds.minX),mapY(suburbBounds.minZ),(suburbBounds.maxX-suburbBounds.minX)*mapScale,(suburbBounds.maxZ-suburbBounds.minZ)*mapScale);
+  const mapScale=320/516,mapMinX=worldMinX-60,mapMinZ=worldMinZ-60;
+  const mapX=x=>(x-mapMinX)*mapScale, mapY=z=>(z-mapMinZ)*mapScale;
+  const mapBase=document.createElement('canvas');mapBase.width=Math.ceil((worldMaxX+60-mapMinX)*mapScale);mapBase.height=Math.ceil((worldMaxZ+60-mapMinZ)*mapScale);
+  const mapPaint=mapBase.getContext('2d');
+  const mapRect=(x0,z0,x1,z1)=>mapPaint.fillRect(mapX(x0),mapY(z0),(x1-x0)*mapScale,(z1-z0)*mapScale);
+  mapPaint.fillStyle='#2d5164';mapPaint.fillRect(0,0,mapBase.width,mapBase.height);
+  mapPaint.fillStyle='#46534f';mapRect(-1600,-1600,-430,1700);mapRect(430,-1600,1600,380);mapRect(brooklyn.maxX,brooklyn.minZ,1600,brooklyn.maxZ);
+  mapPaint.fillStyle='#34434a';mapRect(-262,manhattanMinZ,262,manhattanMaxZ);mapRect(brooklyn.minX,brooklyn.minZ,brooklyn.maxX,brooklyn.maxZ);
   mapPaint.strokeStyle='#64747a';mapPaint.lineWidth=5.5;
-  for(let n=-240;n<=240;n+=40) {
-    mapPaint.beginPath();mapPaint.moveTo(mapX(n),0);mapPaint.lineTo(mapX(n),mapBase.height);mapPaint.stroke();
-  }
-  for(let n=-240;n<=840;n+=40) {
-    mapPaint.beginPath();mapPaint.moveTo(0,mapY(n));mapPaint.lineTo(320,mapY(n));mapPaint.stroke();
-  }
-  for(let n=-480;n< -240;n+=40){mapPaint.beginPath();mapPaint.moveTo(mapX(-200),mapY(n));mapPaint.lineTo(mapX(200),mapY(n));mapPaint.stroke();}
-  mapPaint.fillStyle='#355d70';mapPaint.fillRect(mapX(229),mapY(-200),(258-229)*mapScale,400*mapScale);
+  const mapLine=(x0,z0,x1,z1)=>{mapPaint.beginPath();mapPaint.moveTo(mapX(x0),mapY(z0));mapPaint.lineTo(mapX(x1),mapY(z1));mapPaint.stroke();};
+  for(let x=-240;x<=240;x+=40)mapLine(x,manhattanMinZ,x,940);
+  for(let z=-680;z<=920;z+=40)mapLine(-262,z,262,z);
+  for(let x=360;x<=760;x+=40)mapLine(x,brooklyn.minZ,x,1060);
+  for(let z=440;z<=1040;z+=40)mapLine(brooklyn.minX,z,brooklyn.maxX,z);
+  mapPaint.fillStyle='#2d5164';mapRect(229,-80,262,80);
   mapPaint.fillStyle='#84908c';
   for(let gx=-5;gx<=5;gx+=2)for(let gz=-6;gz<21;gz++) {
     const x=gx*40,z=gz*40+20;
@@ -3740,31 +4499,22 @@
   }
   mapPaint.fillStyle='#293941';
   for(const b of buildings)mapPaint.fillRect(mapX(b.x-b.w/2),mapY(b.z-b.d/2),b.w*mapScale,b.d*mapScale);
-  mapPaint.fillStyle='#496d52';mapPaint.fillRect(mapX(parkBounds.minX),mapY(parkBounds.minZ),(parkBounds.maxX-parkBounds.minX)*mapScale,(parkBounds.maxZ-parkBounds.minZ)*mapScale);
+  mapPaint.fillStyle='#496d52';mapRect(parkBounds.minX,parkBounds.minZ,parkBounds.maxX,parkBounds.maxZ);mapRect(-262,942,262,manhattanMaxZ);
+  mapPaint.fillStyle='#b9a77a';mapRect(brooklyn.minX,1064,brooklyn.maxX,brooklyn.maxZ);
   mapPaint.strokeStyle='#809097';mapPaint.lineWidth=5;
   for(const road of curvedRoads) {
     mapPaint.beginPath();road.samples.forEach((p,i)=>i?mapPaint.lineTo(mapX(p.x),mapY(p.z)):mapPaint.moveTo(mapX(p.x),mapY(p.z)));mapPaint.stroke();
   }
+  mapPaint.strokeStyle='#c7b48e';mapPaint.lineWidth=4;mapLine(150,bridgeZ,440,bridgeZ);
   function mapLabel(ctx,label,x,z,color='#f4f0df') {
     ctx.font='bold 10px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
-    const w=ctx.measureText(label).width+8,px=THREE.MathUtils.clamp(mapX(x),w/2,320-w/2),py=THREE.MathUtils.clamp(mapY(z),7,mapBase.height-7);ctx.fillStyle='rgba(15,29,34,.86)';ctx.fillRect(px-w/2,py-7,w,14);
+    const w=ctx.measureText(label).width+8,px=THREE.MathUtils.clamp(mapX(x),w/2,mapBase.width-w/2),py=THREE.MathUtils.clamp(mapY(z),7,mapBase.height-7);ctx.fillStyle='rgba(15,29,34,.86)';ctx.fillRect(px-w/2,py-7,w,14);
     ctx.fillStyle=color;ctx.fillText(label,px,py);
   }
-  mapLabel(mapPaint,'CENTRAL PARK',-20,0);
-  mapLabel(mapPaint,'SCHOOL',-180,-20);
-  mapLabel(mapPaint,'HOSPITAL',140,20);
-  mapLabel(mapPaint,'BANK',-140,140);
-  mapLabel(mapPaint,'GROCERY',140,140);
-  mapLabel(mapPaint,'CAFE',60,-20);
-  mapLabel(mapPaint,'CAFE',-180,180);
-  mapLabel(mapPaint,'WHARF',235,-65);
-  mapLabel(mapPaint,'PIER',235,110);
-  mapLabel(mapPaint,'EMPIRE STATE',60,300);
-  mapLabel(mapPaint,'TWIN TOWERS',-160,700);
-  mapLabel(mapPaint,'THEATER',60,200);
-  mapLabel(mapPaint,'WASHINGTON SQ',140,235);
-  mapLabel(mapPaint,'WATERFRONT',211,-26);
-  mapLabel(mapPaint,'BRIDGE',207,43);
+  for(const [label,x,z] of [['HARLEM',0,-470],['UPPER WEST SIDE',-170,-60],['UPPER EAST SIDE',140,-140],['CENTRAL PARK',-20,0],['MIDTOWN',-150,330],['TIMES SQ',60,220],['EMPIRE STATE',60,300],
+    ['CHRYSLER',140,260],['FLATIRON',20,460],['THE VILLAGE',-120,560],['WASHINGTON SQ',20,540],['FINANCIAL DISTRICT',40,800],['WORLD TRADE',-160,700],['BATTERY PARK',0,970],['WATERFRONT',211,-26],
+    ['BROOKLYN BRIDGE',300,bridgeZ-14],['DUMBO',430,790],['DOWNTOWN BROOKLYN',480,520],['BROOKLYN',640,900],['CONEY ISLAND',600,1085],['SCHOOL',-180,-20],['HOSPITAL',140,20],['BANK',-140,140],['GROCERY',140,140]])mapLabel(mapPaint,label,x,z);
+  for(const [label,x,z] of [['HUDSON RIVER',-300,200],['EAST RIVER',310,100],['NEW JERSEY',-480,400],['QUEENS',560,-200],['UPPER BAY',100,1060]])mapLabel(mapPaint,label,x,z,'#9fd0e4');
   function drawMinimap(dt) {
     mapTimer-=dt;if(mapTimer>0)return;mapTimer=.08;
     const offsetX=160-mapX(position.x),offsetY=160-mapY(position.z);
@@ -3772,19 +4522,15 @@
     mapContext.drawImage(mapBase,offsetX,offsetY);
     mapContext.fillStyle='#81776a';
     for(const b of destructibleBuildings)if(b.destroyed)mapContext.fillRect(mapX(b.x-b.w/2)+offsetX,mapY(b.z-b.d/2)+offsetY,b.w*mapScale,b.d*mapScale);
-    const rx=mapX(rhino.group.position.x)+offsetX,ry=mapY(rhino.group.position.z)+offsetY;
-    if(rx>=0&&rx<=320&&ry>=0&&ry<=320) {
-      mapContext.fillStyle='#ff665f';mapContext.beginPath();mapContext.arc(rx,ry,4,0,Math.PI*2);mapContext.fill();
-      const labelX=THREE.MathUtils.clamp(rx,23,297),labelY=THREE.MathUtils.clamp(ry-12,8,312);
+    // Active villains show on the map, pinned to its edge when out of range.
+    for(const boss of bosses) {
+      if(boss.status!=='active')continue;
+      const p=boss.actor.group.position,color=`#${boss.color.toString(16).padStart(6,'0')}`;
+      const x=THREE.MathUtils.clamp(mapX(p.x)+offsetX,14,306),y=THREE.MathUtils.clamp(mapY(p.z)+offsetY,14,306);
+      mapContext.fillStyle=color;mapContext.strokeStyle='#170d10';mapContext.lineWidth=2;mapContext.beginPath();mapContext.arc(x,y,6,0,Math.PI*2);mapContext.fill();mapContext.stroke();
       mapContext.font='bold 10px Arial';mapContext.textAlign='center';mapContext.textBaseline='middle';
-      mapContext.fillStyle='rgba(40,20,23,.9)';mapContext.fillRect(labelX-21,labelY-7,42,14);
-      mapContext.fillStyle='#ffb1a9';mapContext.fillText('RHINO',labelX,labelY);
-    }
-    for(const villain of villains) {
-      const vx=mapX(villain.group.position.x)+offsetX,vy=mapY(villain.group.position.z)+offsetY;
-      if(vx<0||vx>320||vy<0||vy>320)continue;
-      mapContext.fillStyle=villain.kind==='goblin'?'#ce8cff':villain.kind==='electro'?'#80eeff':'#a8d86c';
-      mapContext.beginPath();mapContext.arc(vx,vy,4,0,Math.PI*2);mapContext.fill();
+      const labelY=THREE.MathUtils.clamp(y-14,8,312),w=mapContext.measureText(boss.name).width+8,labelX=THREE.MathUtils.clamp(x,w/2+2,318-w/2);
+      mapContext.fillStyle='rgba(30,14,18,.9)';mapContext.fillRect(labelX-w/2,labelY-7,w,14);mapContext.fillStyle=color;mapContext.fillText(boss.name,labelX,labelY);
     }
     if(rescue?.result==='active') {
       const p=rescue.actor.group.position;let x=THREE.MathUtils.clamp(mapX(p.x)+offsetX,12,308),y=THREE.MathUtils.clamp(mapY(p.z)+offsetY,12,308);
@@ -3818,10 +4564,10 @@
       relockOnResume=false;
     }
   }
-  function frame(t) { const dt=Math.min((t-last)/1000||0,.033); last=t;if(paused){requestAnimationFrame(frame);return;} update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderer.clear(); renderer.render(scene,camera); renderer.clearDepth(); renderer.render(handsScene,handsCamera); requestAnimationFrame(frame); }
+  function frame(t) { const raw=Math.min((t-last)/1000||0,.033); last=t;if(paused){requestAnimationFrame(frame);return;} timeScale+=((slowMotion?.3:1)-timeScale)*(1-Math.exp(-10*raw));let dt=raw*timeScale;if(hitStop>0){hitStop-=raw;dt*=.06;} update(dt); drawMinimap(dt); shadowTime-=dt;if(shadowTime<=0){renderer.shadowMap.needsUpdate=true;shadowTime=.1;} renderer.clear(); renderer.render(scene,camera); renderer.clearDepth(); renderer.render(handsScene,handsCamera); requestAnimationFrame(frame); }
   const map={KeyW:'forward',ArrowUp:'forward',KeyS:'back',ArrowDown:'back',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right'};
-  window.addEventListener('keydown',e=>{ if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
-  window.addEventListener('keyup',e=>{ if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; });
+  window.addEventListener('keydown',e=>{ if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if((e.code==='KeyF'||e.code==='KeyQ')&&!e.repeat)spiderSlap(); if(e.code==='KeyT'){slowMotion=true;document.querySelector('.game-shell').classList.add('slowmo');} if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
+  window.addEventListener('keyup',e=>{ if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; if(e.code==='KeyT'){slowMotion=false;document.querySelector('.game-shell').classList.remove('slowmo');} });
   window.addEventListener('blur',()=>{ Object.keys(keys).forEach(k=>keys[k]=false); cancelWebGrab();swing(false); });
   canvas.addEventListener('pointerdown',e=>{
     if(paused)return;
@@ -3830,7 +4576,7 @@
       const locked=document.pointerLockElement===canvas;
       const rect=canvas.getBoundingClientRect();
       const x=locked?0:(e.clientX-rect.left)/rect.width*2-1, y=locked?0:1-(e.clientY-rect.top)/rect.height*2;
-      if(e.button===0) beginWebAction(x,y); else if(e.button===2) fireBomb(x,y);
+      if(e.button===0) beginWebAction(x,y); else if(e.button===2) fireBomb(x,y); else if(e.button===1) spiderSlap();
       if (!locked && canvas.requestPointerLock) canvas.requestPointerLock();
     }
     else { canvas.setPointerCapture(e.pointerId); }
@@ -3842,16 +4588,16 @@
   canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'){touchX=e.clientX;touchY=e.clientY;}});
   canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse' && e.buttons){yaw-=(e.clientX-touchX)*.005;pitch=THREE.MathUtils.clamp(pitch-(e.clientY-touchY)*.005,-1.35,1.35);touchX=e.clientX;touchY=e.clientY;}});
   document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(!locked && pointerWasLocked && !paused){pointerUnlockTime=performance.now();setPaused(true,true);}pointerWasLocked=locked;if(!locked && !paused){cancelWebGrab();swing(false);}});
-  for (const id of ['forward','back','left','right','sprint','jump','swing','bomb','zip']) {
+  for (const id of ['forward','back','left','right','sprint','jump','swing','bomb','zip','slap']) {
     const button=document.getElementById(id);
-    button.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();button.setPointerCapture(e.pointerId);if(id==='jump')jump();else if(id==='swing')beginWebAction();else if(id==='bomb')fireBomb();else if(id==='zip')webZip();else keys[id]=true;});
-    const release=e=>{e.stopPropagation();if(id==='swing'){if(e.type==='pointerup')endWebAction();else{cancelWebGrab();swing(false);}}else if(id!=='jump' && id!=='bomb' && id!=='zip')keys[id]=false;};
+    button.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();button.setPointerCapture(e.pointerId);if(id==='jump')jump();else if(id==='swing')beginWebAction();else if(id==='bomb')fireBomb();else if(id==='zip')webZip();else if(id==='slap')spiderSlap();else keys[id]=true;});
+    const release=e=>{e.stopPropagation();if(id==='swing'){if(e.type==='pointerup')endWebAction();else{cancelWebGrab();swing(false);}}else if(id!=='jump' && id!=='bomb' && id!=='zip' && id!=='slap')keys[id]=false;};
     button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);
   }
   nukeButton.addEventListener('pointerdown',event=>event.stopPropagation());
   nukeButton.addEventListener('click',event=>{event.stopPropagation();if(!paused)launchNuke();});
   resumeButton.addEventListener('click',()=>setPaused(false));
-  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();handsCamera.aspect=camera.aspect;handsCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+  window.addEventListener('resize',()=>{particleMaterial.uniforms.viewport.value=innerHeight*renderer.getPixelRatio();camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();handsCamera.aspect=camera.aspect;handsCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
   // Batch the static details added after the buildings were constructed too.
   batchBuildingDetails();
   // Keep distant actors interactive while rendering a low-cost silhouette.
@@ -3894,6 +4640,206 @@
     });
     distantTrunks.instanceMatrix.needsUpdate=true;distantCanopies.instanceMatrix.needsUpdate=true;
   }
-  reset();updateSceneDetail();requestAnimationFrame(frame);
+  // ---- Things to do: golden pizza, ring races and hydrant geysers ----
+  const activityHud=document.getElementById('activity'),raceHud=document.getElementById('race-hud');
+  scene.updateMatrixWorld(true);
+  // Golden pizza slices hide on rooftops across both boroughs and on the big landmarks.
+  const pizzaSpots=[[-145.8,82,1215],[60,198,300],[140,152,260],[286,46,bridgeZ],[342,46,bridgeZ],[560,27,1084],[60,56,220],[20,13.6,530],[20,3,925],[-180,177,700],[-140,174,700],[20,55,460]].map(([x,y,z])=>new THREE.Vector3(x,y,z));
+  {
+    const candidates=buildings.filter(b=>!b.destroyed && !b.landmark && b.height>8).sort((a,b)=>random(a.x*3.1+b.z)-random(b.x*3.1+a.z));
+    const down=new THREE.Vector3(0,-1,0);
+    for(const b of candidates) {
+      if(pizzaSpots.length>=40)break;
+      if(pizzaSpots.some(p=>Math.hypot(p.x-b.x,p.z-b.z)<70))continue;
+      raycaster.set(new THREE.Vector3(b.x,400,b.z),down);raycaster.far=420;
+      const hit=raycaster.intersectObjects(grappleMeshes,false)[0];
+      if(hit)pizzaSpots.push(hit.point.clone().setY(hit.point.y+1.4));
+    }
+    raycaster.far=150;
+  }
+  const pizzaGeometry=(()=>{const geometry=new THREE.CylinderGeometry(1,1,.22,3);geometry.scale(.75,1,1.1);return geometry;})();
+  const pizzaMaterial=new THREE.MeshStandardMaterial({color:0xffc83a,emissive:0xff9a1a,emissiveIntensity:.7,metalness:.6,roughness:.3});
+  const pizzas=new THREE.InstancedMesh(pizzaGeometry,pizzaMaterial,pizzaSpots.length);pizzas.frustumCulled=false;pizzas.userData.projectile=true;pizzas.raycast=()=>{};scene.add(pizzas);
+  let pizzaCollected=new Set();
+  try{pizzaCollected=new Set(JSON.parse(localStorage.getItem('spida.pizza')||'[]'));}catch(_){/* Fall back to a fresh hunt. */}
+  const pizzaTransform=new THREE.Object3D();
+  function updatePizza(dt) {
+    pizzaSpots.forEach((spot,i)=>{
+      if(pizzaCollected.has(i)){pizzas.setMatrixAt(i,hiddenPizza);return;}
+      pizzaTransform.position.copy(spot);pizzaTransform.position.y+=Math.sin(elapsed*2+i)*.25;pizzaTransform.rotation.set(Math.PI/2*.3,elapsed*2+i,0);pizzaTransform.scale.setScalar(1.3);
+      pizzaTransform.updateMatrix();pizzas.setMatrixAt(i,pizzaTransform.matrix);
+      if(spot.distanceToSquared(position.clone().setY(position.y+1))<2.6*2.6) {
+        pizzaCollected.add(i);try{localStorage.setItem('spida.pizza',JSON.stringify([...pizzaCollected]));}catch(_){/* Session only. */}
+        playEffect('success');burst(spot,40,[0xffc83a,0xff5a36,0xffffff],{speed:8,up:5,life:1,size:.35});
+        awardChaos(500,`GOLDEN PIZZA ${pizzaCollected.size}/${pizzaSpots.length}`,spot.clone(),'hero');
+        worldPopup(pick(['Still warm?!','Pigeon-tested','Rooftop pizza hits different','Only slightly radioactive','Worth the climb','Grease = power']),spot.clone().setY(spot.y+1),'speech',2);
+        if(pizzaCollected.size===pizzaSpots.length)showBreaking('ALL 40 GOLDEN PIZZAS FOUND. YOU ARE THE PIZZA RAT NOW.');
+        updateActivityHud();
+      }
+    });
+    pizzas.instanceMatrix.needsUpdate=true;
+  }
+  const hiddenPizza=new THREE.Matrix4().makeTranslation(0,-1e4,0);
+  // Ring races: fly through each ring in order against the clock.
+  const raceCourses=[
+    {name:'MIDTOWN MADNESS',par:[22,30,40],start:[80,3,470],rings:[[80,22,430],[80,32,390],[80,40,350],[80,30,310],[60,26,280],[20,22,280],[-20,30,280],[-60,36,280],[-80,26,240],[-80,20,200]]},
+    {name:'BRIDGE RUN',par:[18,25,34],start:[200,3,740],rings:[[232,20,760],[266,28,760],[300,34,760],[330,26,760],[362,30,760],[400,22,760],[440,18,740],[480,24,710],[520,18,680]]},
+    {name:'HARLEM HUSTLE',par:[24,32,44],start:[-40,3,-250],rings:[[-40,14,-300],[-40,20,-350],[-40,14,-400],[-40,24,-450],[-40,16,-500],[-40,24,-550],[0,18,-600],[40,26,-600],[80,18,-600],[120,22,-560]]},
+    {name:'CONEY COASTER',par:[16,22,30],start:[380,3,1040],rings:[[420,8,1066],[460,18,1070],[500,10,1074],[560,27,1084],[600,12,1074],[640,22,1070],[680,8,1066],[720,16,1070]]}
+  ].map(course=>({...course,start:new THREE.Vector3(...course.start),rings:course.rings.map(r=>new THREE.Vector3(...r))}));
+  const ringGeometry=new THREE.TorusGeometry(4.2,.32,10,40);
+  const startRingMaterial=new THREE.MeshBasicMaterial({color:0x6fe3ff,transparent:true,opacity:.75,toneMapped:false});
+  const activeRingMaterial=new THREE.MeshBasicMaterial({color:0xffd25e,toneMapped:false}),nextRingMaterial=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.35,toneMapped:false});
+  for(const course of raceCourses) {
+    const ring=new THREE.Mesh(ringGeometry,startRingMaterial);ring.position.copy(course.start).setY(4.6);ring.lookAt(course.rings[0].x,4.6,course.rings[0].z);
+    ring.userData.projectile=true;ring.raycast=()=>{};scene.add(ring);course.marker=ring;
+    try{course.best=Number(localStorage.getItem(`spida.race.${course.name}`))||null;}catch(_){course.best=null;}
+  }
+  const raceRing=new THREE.Mesh(ringGeometry,activeRingMaterial),raceNext=new THREE.Mesh(ringGeometry,nextRingMaterial);
+  for(const ring of [raceRing,raceNext]){ring.visible=false;ring.userData.projectile=true;ring.raycast=()=>{};scene.add(ring);}
+  let race=null,raceCooldown=0;
+  function placeRaceRings() {
+    const current=race.course.rings[race.index],next=race.course.rings[race.index+1];
+    raceRing.position.copy(current);raceRing.lookAt(next||current.clone().add(current.clone().sub(race.course.rings[race.index-1]||race.course.start)));raceRing.visible=true;
+    raceNext.visible=Boolean(next);if(next){raceNext.position.copy(next);raceNext.lookAt(race.course.rings[race.index+2]||next.clone().add(next.clone().sub(current)));}
+  }
+  function updateRaces(dt) {
+    raceCooldown=Math.max(0,raceCooldown-dt);
+    const body=position.clone().setY(position.y+1);
+    for(const course of raceCourses) {
+      course.marker.rotation.z+=dt*.8;course.marker.scale.setScalar(1+.06*Math.sin(elapsed*4));course.marker.visible=!race;
+      if(!race && !raceCooldown && course.marker.position.distanceTo(body)<4.6) {
+        race={course,index:0,time:0};placeRaceRings();playEffect('alert');showBreaking(`RACE: ${course.name}. GOLD UNDER ${course.par[0]}s.`);
+      }
+    }
+    if(!race){if(raceHud)raceHud.hidden=true;return;}
+    race.time+=dt;
+    raceRing.rotation.z+=dt*1.5;raceRing.scale.setScalar(1+.05*Math.sin(elapsed*8));
+    if(raceRing.position.distanceTo(body)<4.8) {
+      playEffect('zip');burst(raceRing.position,24,[0xffd25e,0xffffff],{speed:10,life:.5,size:.3});race.index++;
+      if(race.index>=race.course.rings.length) {
+        const time=race.time,[gold,silver,bronze]=race.course.par,medal=time<=gold?'GOLD':time<=silver?'SILVER':time<=bronze?'BRONZE':'PARTICIPATION';
+        const record=!race.course.best || time<race.course.best;if(record){race.course.best=time;try{localStorage.setItem(`spida.race.${race.course.name}`,String(time));}catch(_){/* Session only. */}}
+        awardChaos(medal==='GOLD'?3000:medal==='SILVER'?2000:medal==='BRONZE'?1200:300,`${medal} ${time.toFixed(1)}s`,raceRing.position.clone(),'hero');
+        showBreaking(`${race.course.name}: ${time.toFixed(2)}s, ${medal}${record?' (NEW RECORD)':''}${medal==='PARTICIPATION'?'. YOUR MOM IS STILL PROUD.':''}`);
+        burst(raceRing.position,80,confetti,{speed:14,up:8,life:1.8,size:.35});playEffect('success');
+        raceRing.visible=raceNext.visible=false;race=null;raceCooldown=4;updateActivityHud();return;
+      }
+      placeRaceRings();
+    }
+    if(race.time>120 || keys.back && keys.forward){raceRing.visible=raceNext.visible=false;race=null;raceCooldown=3;showBreaking('RACE ABANDONED. NOBODY SAW. (EVERYONE SAW.)');return;}
+    if(raceHud){raceHud.hidden=false;raceHud.textContent=`${race.course.name}  ${race.time.toFixed(1)}s  •  RING ${race.index+1}/${race.course.rings.length}`;}
+  }
+  // Fire hydrants: slap or tackle one and it erupts into a launch-pad geyser.
+  const geysers=[];
+  function burstHydrant(hydrant) {
+    if(hydrant.userData.geyser>0)return;
+    hydrant.userData.geyser=6;geysers.push(hydrant);playEffect('splat',hydrant.position);
+    awardChaos(150,pick(['HYDRANT HAVOC','FREE SHOWER','CITY WATER BILL +$40K']),hydrant.position.clone().setY(2.5));
+  }
+  function updateGeysers(dt) {
+    for(const hydrant of hydrants) {
+      if(hydrant.userData.geyser>0)continue;
+      const dx=hydrant.position.x-position.x,dz=hydrant.position.z-position.z;
+      if(dx*dx+dz*dz<1.3 && position.y<1.6 && Math.hypot(velocity.x,velocity.z)>8)burstHydrant(hydrant);
+    }
+    for(let i=geysers.length-1;i>=0;i--) {
+      const hydrant=geysers[i],p=hydrant.position;hydrant.userData.geyser-=dt;
+      if(hydrant.userData.geyser<=0){geysers.splice(i,1);continue;}
+      const top=p.clone().setY(p.y+.7);
+      burst(top,3,[0xd8f4ff,0x9fd8f0,0xffffff],{speed:3,up:22,life:1.1,gravity:16,size:.45,drag:.4,spread:.3});
+      if(Math.hypot(position.x-p.x,position.z-p.z)<1.6 && position.y<14){velocity.y=Math.max(velocity.y,26);onGround=false;if(!hydrant.userData.launched){hydrant.userData.launched=true;awardChaos(200,'GEYSER LAUNCH',null,'trick');}}
+      for(const npc of pedestrians) {
+        const q=npc.group.position;
+        if(!npc.knockback && !npc.dead && Math.abs(q.x-p.x)<1.6 && Math.abs(q.z-p.z)<1.6){throwActor(npc,null,false,new THREE.Vector3((Math.random()-.5)*4,24,(Math.random()-.5)*4));say(npc,'fly');}
+      }
+    }
+  }
+  function updateActivityHud() {
+    if(!activityHud)return;
+    const medals=raceCourses.filter(c=>c.best && c.best<=c.par[0]).length;
+    activityHud.innerHTML=`<span>🍕 ${pizzaCollected.size}/${pizzaSpots.length}</span><span>🏁 GOLD ${medals}/${raceCourses.length}</span>`;
+  }
+  updateActivityHud();
+  // Manhole steam, because it is not New York without it.
+  const steamVents=[],manholeMat=material(0x2a2e31),manholeGeometry=new THREE.CircleGeometry(.55,16);
+  for(let i=-5;i<=5;i++)for(let j=-16;j<=22;j++) {
+    if(random(i*61+j*17+5)>.16 || i===-1 || i===0 && j>-6 && j<5)continue;
+    const vent=new THREE.Mesh(manholeGeometry,manholeMat);vent.rotation.x=-Math.PI/2;vent.position.set(i*40-1.5,.03,j*40+20);scene.add(vent);steamVents.push(vent.position);
+  }
+  let steamTimer=0;
+  function updateSteam(dt) {
+    steamTimer-=dt;if(steamTimer>0)return;steamTimer=.08;
+    for(const vent of steamVents)if(Math.abs(vent.x-position.x)<110 && Math.abs(vent.z-position.z)<110)
+      burst(vent,1,[0xeef0f2,0xd8dcdf],{speed:.5,up:2.5,gravity:-.5,life:2.8,size:2.6,drag:.8,spread:.6});
+  }
+  function updateActivities(dt){updatePizza(dt);updateRaces(dt);updateGeysers(dt);updateSteam(dt);}
+  // Distance LOD: city chunks beyond the detail radius move to a hidden layer and
+  // their towers are drawn by a few instanced stand-ins, cutting draw calls sharply.
+  const lodHiddenLayer=3,lodNear=300,lodCell=120,lodChunks=new Map(),lodProxies=[];
+  {
+    const dynamic=new Set([sky,anchorMarker,webRibbon,anchorPreview,particleSystem,wadeRipple,sun,sun.target,fill,rhino.group,distantTrunks,distantCanopies,roadMarks,
+      ...webLines,...cars.map(a=>a.group),...pedestrians.map(a=>a.group),...dogs.flatMap(d=>[d.group,d.leash]),...helicopters.map(h=>h.group),...birds.map(b=>b.group),
+      ...harborBoats,...highAircraft.map(a=>a.group),...villains.map(v=>v.group),...chargeProps.map(p=>p.group)]);
+    const bounds=new THREE.Box3(),center=new THREE.Vector3(),size=new THREE.Vector3();
+    for(const object of scene.children) {
+      if(dynamic.has(object) || object.isLight || object.userData.actor || object.userData.projectile)continue;
+      bounds.setFromObject(object);if(bounds.isEmpty())continue;
+      bounds.getCenter(center);bounds.getSize(size);
+      if(Math.max(size.x,size.z)>150 || object.userData.skyline || bounds.max.y>120)continue;
+      // Street furniture disappears much sooner than buildings do.
+      const small=Math.max(size.x,size.y,size.z)<9,cell=small?60:lodCell;
+      const key=`${small?'s':'b'}${Math.floor(center.x/cell)},${Math.floor(center.z/cell)}`;
+      if(!lodChunks.has(key))lodChunks.set(key,{x:(Math.floor(center.x/cell)+.5)*cell,z:(Math.floor(center.z/cell)+.5)*cell,objects:[],near:true,small});
+      lodChunks.get(key).objects.push(object);
+    }
+    // Stand-ins reuse the real facade materials, so the far skyline matches.
+    const proxyGroups=new Map(),unitBox=new THREE.BoxGeometry(1,1,1);
+    for(const mesh of grappleMeshes) {
+      if(!mesh.isMesh || mesh.isInstancedMesh || !buildingMats.includes(mesh.material) && mesh.material!==mats.roof)continue;
+      const type=mesh.geometry.type==='BoxGeometry'?'box':mesh.geometry===roundTowerGeometry?'round':mesh.geometry===diamondTowerGeometry?'diamond':mesh.geometry===octagonalTowerGeometry?'octagon':null;
+      if(!type)continue;
+      mesh.updateWorldMatrix(true,false);bounds.setFromObject(mesh);bounds.getCenter(center);if(bounds.max.y>120 || mesh.userData.skyline)continue;
+      const chunk=lodChunks.get(`b${Math.floor(center.x/lodCell)},${Math.floor(center.z/lodCell)}`);if(!chunk)continue;
+      const key=`${type}:${mesh.material.id}`;
+      if(!proxyGroups.has(key))proxyGroups.set(key,{type,material:mesh.material,items:[]});
+      const matrix=type==='box'?new THREE.Matrix4().compose(center.clone(),mesh.getWorldQuaternion(new THREE.Quaternion()),bounds.getSize(new THREE.Vector3())):mesh.matrixWorld.clone();
+      proxyGroups.get(key).items.push({mesh,chunk,matrix});
+    }
+    for(const {type,material,items} of proxyGroups.values()) {
+      const geometry=type==='box'?unitBox:type==='round'?roundTowerGeometry:type==='diamond'?diamondTowerGeometry:octagonalTowerGeometry;
+      const batch=new THREE.InstancedMesh(geometry,material,items.length);batch.frustumCulled=false;batch.raycast=()=>{};batch.userData.projectile=true;scene.add(batch);
+      items.forEach((item,index)=>{item.batch=batch;item.index=index;batch.setMatrixAt(index,hiddenDetail);lodProxies.push(item);});
+    }
+  }
+  let lodTimer=0;
+  function updateCityLod(dt,force=false) {
+    lodTimer-=dt;if(lodTimer>0 && !force)return;lodTimer=.25;
+    const range=lodNear+Math.min(position.y,120)*.8;let changed=false;
+    for(const chunk of lodChunks.values()) {
+      const near=Math.hypot(chunk.x-position.x,chunk.z-position.z)<(chunk.small?115:range);
+      if(near===chunk.near && !force)continue;
+      chunk.near=near;changed=true;
+      for(const object of chunk.objects)object.traverse(child=>{if(near)child.layers.enable(0);else child.layers.set(lodHiddenLayer);});
+    }
+    // Knockable props move, so they are culled by their own current position.
+    for(const prop of chargeProps) {
+      const p=prop.group.position,near=Boolean(prop.knockback) || (p.x-position.x)**2+(p.z-position.z)**2<115*115;
+      if(near===prop.lodNear)continue;
+      prop.lodNear=near;prop.group.traverse(child=>{if(near)child.layers.enable(0);else child.layers.set(lodHiddenLayer);});
+    }
+    const touched=new Set();
+    for(const proxy of lodProxies) {
+      const show=!proxy.chunk.near && proxy.mesh.visible && !proxy.mesh.userData.structure?.destroyed;
+      if(show===proxy.shown)continue;
+      proxy.shown=show;proxy.batch.setMatrixAt(proxy.index,show?proxy.matrix:hiddenDetail);touched.add(proxy.batch);
+    }
+    for(const batch of touched)batch.instanceMatrix.needsUpdate=true;
+    return changed;
+  }
+  // Opt-in test hook for automated playtesting: open the game with ?debug.
+  if(new URLSearchParams(location.search).has("debug"))window.__spida={renderer,scene,grappleMeshes,buildings,position,velocity,keys,pedestrians,cars,mutators,beginWebAction,endWebAction,jump,spiderSlap,setMutator,
+    look:(y,p)=>{yaw=y;pitch=p;},tick:(seconds,dt=1/60)=>{for(let t=0;t<seconds;t+=dt)update(dt);renderer.shadowMap.needsUpdate=true;renderer.clear();renderer.render(scene,camera);renderer.clearDepth();renderer.render(handsScene,handsCamera);drawMinimap(1);},state:()=>({rope:Boolean(rope),onGround,speed:velocity.length(),chaosScore,comboPoints,opinion,anchor:rope?.anchor})};
+  reset();updateSceneDetail();updateCityLod(0,true);requestAnimationFrame(frame);
 })();
 
