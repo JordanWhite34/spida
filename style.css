@@ -104,3 +104,64 @@ kbd { display: inline-block; min-width: 24px; margin-right: 2px; padding: 3px 5p
 
 .music-toggle { width:100%; margin-top:18px; padding:10px; border:1px solid rgba(211,226,231,.35); border-radius:8px; background:#233943; color:white; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; }
 .music-toggle:hover,.music-toggle:focus-visible { background:#35515d; outline:2px solid #fff; outline-offset:2px; }
+
+/* Chaos HUD, combo feed and floating popups */
+.speed-lines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.popups { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.popup { position:absolute; left:0; top:0; white-space:nowrap; will-change:transform; font-weight:900; }
+.popup.burst { font-size:26px; font-style:italic; letter-spacing:-.02em; color:#ffd25e; -webkit-text-stroke:1.5px #1a0e08; text-shadow:0 3px 0 #1a0e08; }
+.popup.burst.trick { color:#6fe3ff; }
+.popup.burst.hero { color:#7dffa6; font-size:32px; }
+.popup.burst.oops { color:#ff6a5f; }
+.popup.burst.combo { color:#fff; font-size:40px; -webkit-text-stroke:2px #c2186b; text-shadow:0 4px 0 #c2186b; }
+.popup.speech { max-width:none; padding:7px 11px; border:2px solid #1b1b1b; border-radius:14px; background:#fffef6; color:#151515; font-size:14px; font-weight:800; font-family:"Comic Sans MS","Comic Neue","Chalkboard SE",sans-serif; box-shadow:0 3px 0 #1b1b1b; }
+.popup.speech::after { content:""; position:absolute; left:50%; bottom:-9px; width:12px; height:12px; background:#fffef6; border-right:2px solid #1b1b1b; border-bottom:2px solid #1b1b1b; transform:translateX(-50%) rotate(45deg); }
+.chaos-hud { position:absolute; top:18px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:4px; pointer-events:none; color:#fff; text-align:center; }
+.chaos-score { display:flex; align-items:baseline; gap:8px; padding:6px 14px; border-radius:999px; background:rgba(12,20,28,.55); backdrop-filter:blur(6px); }
+.chaos-score span { font-size:10px; font-weight:800; letter-spacing:.22em; color:#ff8b80; }
+.chaos-score strong { font-size:22px; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.chaos-combo { min-height:30px; font-size:26px; font-weight:900; font-style:italic; color:#ffd25e; -webkit-text-stroke:1.5px #1a0e08; text-shadow:0 3px 0 #1a0e08; }
+.chaos-combo.hot { color:#ff5fa2; animation:combo-pulse .45s ease-in-out infinite alternate; }
+@keyframes combo-pulse { to { transform:scale(1.12) rotate(-2deg); } }
+.chaos-feed { display:flex; flex-direction:column; align-items:center; gap:2px; }
+.feed-row { font-size:13px; font-weight:900; letter-spacing:.06em; color:#fff; text-shadow:0 2px 6px #000a; animation:feed-in .2s ease-out; transition:opacity .6s, transform .6s; }
+.feed-row.trick { color:#8ee9ff; } .feed-row.hero { color:#8dffb0; } .feed-row.oops { color:#ff8b80; }
+.feed-row.fade { opacity:0; transform:translateY(-6px); }
+@keyframes feed-in { from { opacity:0; transform:scale(1.6); } }
+.opinion { position:absolute; left:76px; top:18px; width:190px; padding:9px 12px; border-radius:10px; background:rgba(12,20,28,.55); backdrop-filter:blur(6px); color:#fff; pointer-events:none; }
+.opinion span { display:block; font-size:9px; font-weight:800; letter-spacing:.2em; color:#aebfc5; }
+.opinion b { display:block; margin:2px 0 5px; font-size:14px; font-weight:900; letter-spacing:.04em; }
+.opinion i { display:block; height:5px; border-radius:3px; background:rgba(255,255,255,.15); overflow:hidden; }
+.opinion em { display:block; width:50%; height:100%; background:#ffc75e; transition:width .4s, background .4s; }
+.game-shell.slowmo canvas#game { filter:saturate(.55) contrast(1.15) hue-rotate(-12deg); }
+.game-shell.slowmo .screen-shade { background:radial-gradient(ellipse at center, transparent 35%, rgba(60,0,40,.45) 100%); }
+.mutators { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.mutators button { padding:10px; border:1px solid rgba(211,226,231,.35); border-radius:8px; background:#233943; color:#fff; font:700 13px/1.2 inherit; cursor:pointer; }
+.mutators button.on { background:#b8364a; border-color:#ffb1a9; }
+.mutators button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+@media (max-width:600px) { .opinion { display:none; } .chaos-score strong { font-size:18px; } }
+
+/* Villain alerts, boss health and the nuke lock */
+.villain-tracker { display:flex; flex-wrap:wrap; gap:4px; margin-top:7px; }
+.villain-tracker span { padding:2px 5px; border-radius:4px; background:rgba(255,255,255,.08); color:rgba(255,255,255,.45); font-size:8px; font-weight:900; letter-spacing:.08em; }
+.villain-tracker span.active { color:var(--villain); background:rgba(255,255,255,.14); animation:combo-pulse .6s ease-in-out infinite alternate; }
+.villain-tracker span.beaten { color:#141414; background:var(--villain); text-decoration:line-through; }
+.villain-tracker .nuke-state { color:#ffb169; } .villain-tracker .nuke-state.ready { color:#141414; background:#ffb169; }
+.nuke-button.locked { filter:grayscale(1); opacity:.5; }
+.breaking { position:absolute; top:150px; left:50%; display:flex; align-items:stretch; max-width:min(92vw,720px); transform:translateX(-50%); pointer-events:none; box-shadow:0 8px 30px #0008; }
+.breaking b { padding:9px 12px; background:#d3132b; color:#fff; font-size:13px; font-weight:900; letter-spacing:.14em; }
+.breaking span { padding:9px 14px; background:#fffef6; color:#111; font-size:15px; font-weight:900; letter-spacing:.02em; }
+.breaking.show { animation:breaking-in .35s cubic-bezier(.2,1.4,.4,1); }
+@keyframes breaking-in { from { transform:translate(-50%,-30px) scale(.9); opacity:0; } }
+.boss-bar { position:absolute; bottom:24px; left:50%; width:min(86vw,460px); transform:translateX(-50%); pointer-events:none; color:#fff; text-align:center; text-shadow:0 2px 6px #000a; }
+.boss-head { display:flex; justify-content:center; align-items:baseline; gap:10px; }
+.boss-head strong { font-size:20px; font-weight:900; font-style:italic; letter-spacing:.06em; }
+.boss-head em { font-size:11px; font-weight:900; font-style:normal; letter-spacing:.14em; }
+.boss-head em.stunned { color:#6fe3ff; } .boss-head em.enraged { color:#ff5b4f; animation:combo-pulse .3s infinite alternate; }
+.boss-bar small { display:block; margin:2px 0 6px; color:rgba(255,255,255,.75); font-size:11px; font-weight:700; }
+.boss-bar i { display:block; height:9px; border:1px solid rgba(255,255,255,.6); border-radius:5px; background:rgba(0,0,0,.45); overflow:hidden; }
+.boss-bar i span { display:block; height:100%; transition:width .2s; }
+@media (pointer: coarse) { .boss-bar { bottom:120px; } }
+.activity { display:flex; gap:8px; margin-top:6px; font-size:10px; font-weight:900; letter-spacing:.06em; color:#ffd25e; }
+.race-hud { position:absolute; top:84px; left:50%; transform:translateX(-50%); padding:6px 14px; border-radius:8px; background:rgba(255,210,94,.92); color:#1a1206; font-size:15px; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:.04em; pointer-events:none; white-space:nowrap; }
+.breaking[hidden], .boss-bar[hidden], .race-hud[hidden] { display:none; }
