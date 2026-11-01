@@ -9,6 +9,9 @@ if (window.installFeaturedHydrant) {
 }
 
 const loader = new GLTFLoader();
+Promise.all([loader.loadAsync('assets/spider-hero.glb'),loader.loadAsync('assets/spider-animations.glb')])
+  .then(([model,animations])=>window.installHeroRig?.(model.scene,animations.animations))
+  .catch(error=>console.warn('Hero model could not be loaded:',error));
 for (const kind of ['sedan', 'taxi', 'van', 'firetruck']) {
   loader.load(`assets/kenney-cars/${kind}.glb`, gltf => {
     window.installCityVehicle?.(kind, gltf.scene);

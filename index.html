@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Skyline Swing</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <main class="game-shell">
-    <canvas id="game" tabindex="0" aria-label="First-person city swinging game"></canvas>
+    <canvas id="game" tabindex="0" aria-label="City swinging game"></canvas>
 
     <div id="speed-blur" class="speed-blur" aria-hidden="true"><div></div><div></div></div>
     <div class="screen-shade" aria-hidden="true"></div>
@@ -39,7 +39,7 @@
 
     <div class="mobile-controls" aria-label="Touch controls">
       <div class="mobile-move"><button id="forward" aria-label="Move forward">&#8593;</button><div><button id="left" aria-label="Move left">&#8592;</button><button id="back" aria-label="Move backward">&#8595;</button><button id="right" aria-label="Move right">&#8594;</button></div></div>
-      <div class="mobile-actions"><button id="sprint" aria-label="Hold to sprint">&#187;</button><button id="jump" aria-label="Jump">&#8613;</button><button id="zip" aria-label="Web zip">&#10148;</button><button id="bomb" aria-label="Shoot a web bomb">&#10041;</button><button id="slap" aria-label="Spider-slap">&#9995;</button><button id="swing" aria-label="Hold to swing">&#9673;</button></div>
+      <div class="mobile-actions"><button id="sprint" aria-label="Hold to sprint">&#187;</button><button id="jump" aria-label="Jump">&#8613;</button><button id="dodge" aria-label="Dodge">&#10548;</button><button id="zip" aria-label="Web zip">&#10148;</button><button id="bomb" aria-label="Shoot a web bomb">&#10041;</button><button id="slap" aria-label="Spider-slap">&#9995;</button><button id="swing" aria-label="Hold to swing">&#9673;</button><button id="camera-view" aria-label="Switch camera view">&#128247;</button></div>
     </div>
     <div id="pause-menu" class="pause-menu" hidden>
       <section class="pause-panel" role="dialog" aria-modal="true" aria-labelledby="pause-title">
@@ -49,6 +49,7 @@
         <dl class="pause-controls">
           <div><dt>Move</dt><dd><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <span>or arrow keys</span></dd></div>
           <div><dt>Look / aim</dt><dd>Mouse</dd></div>
+          <div><dt>Switch camera</dt><dd><kbd>V</kbd></dd></div>
           <div><dt>Swing / web an object</dt><dd>Hold left click</dd></div>
           <div><dt>Web an object to a spot</dt><dd>Hold, aim, release</dd></div>
           <div><dt>Web bomb</dt><dd>Right click</dd></div>
@@ -58,6 +59,7 @@
           <div><dt>Glide while airborne</dt><dd>Hold <kbd>Shift</kbd> <span>and look up or down to pitch</span></dd></div>
           <div><dt>Climb a wall</dt><dd>Hold forward against it</dd></div>
           <div><dt>Spider-slap</dt><dd><kbd>F</kbd> <span>or middle click</span></dd></div>
+          <div><dt>Dodge</dt><dd><kbd>C</kbd> <span>and a direction</span></dd></div>
           <div><dt>Spider-sense slow-mo</dt><dd>Hold <kbd>T</kbd></dd></div>
           <div><dt>Yeet a webbed thing</dt><dd>Grab it, aim at the sky, release</dd></div>
           <div><dt>Finisher</dt><dd>Land 6 hits, then slap</dd></div>
@@ -77,6 +79,8 @@
         </div>
         <button id="music-toggle" class="music-toggle" type="button" aria-pressed="true">Music: On</button>
         <button id="effects-toggle" class="music-toggle" type="button" aria-pressed="true">Sound effects: On</button>
+        <button id="graphics-toggle" class="music-toggle" type="button">Graphics: Balanced</button>
+        <button id="camera-toggle" class="music-toggle" type="button">Camera: Third person</button>
         <button id="resume-game" class="resume-game">Resume game</button>
       </section>
     </div>
@@ -86,8 +90,8 @@
   <script src="toy-models.js?v=6"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
-  <script src="game.js?v=6"></script>
+  <script src="game.js?v=13"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
-  <script type="module" src="featured-model.js"></script>
+  <script type="module" src="featured-model.js?v=2"></script>
 </body>
 </html>
