@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Skyline Swing</title>
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
   <main class="game-shell">
@@ -38,13 +38,17 @@
     </div>
     <div class="opinion" aria-label="Public opinion"><span>PUBLIC OPINION</span><b id="opinion-label">MID</b><i><em id="opinion-bar"></em></i><div id="villain-tracker" class="villain-tracker"></div><div id="activity" class="activity"></div></div>
     <div id="race-hud" class="race-hud" hidden></div>
-    <div class="hero-hud" aria-label="Health and level"><div class="hp"><span>HP</span><i><em id="hp-bar"></em></i></div><div class="lvl"><b id="level-label">LV 1</b><i><em id="xp-bar"></em></i></div></div>
+    <div class="hero-hud" aria-label="Health and level"><div class="hp"><span>HP</span><i><em id="hp-bar"></em></i></div><div class="lvl"><b id="level-label">LV 1</b><i><em id="xp-bar"></em></i></div><div class="bucks-row"><span>CASH</span><b id="bucks">$0</b></div></div>
     <div id="mission" class="mission" hidden><small id="mission-step"></small><b id="mission-title"></b><span id="mission-text"></span><em id="mission-distance"></em></div>
     <div id="hits" class="hits" hidden></div>
     <div id="district" class="district" hidden><b></b><span></span></div>
     <div class="sense-edge" aria-hidden="true"></div>
     <div id="hint" class="hint-box" role="status" aria-live="polite" hidden></div>
     <div id="photo-bar" class="photo-bar" aria-live="polite"></div>
+    <div id="interact" class="interact-prompt" hidden></div>
+    <div id="fade" class="fade" aria-hidden="true"></div>
+    <section id="shop" class="travel-menu shop-menu" hidden aria-labelledby="shop-title"><div class="travel-card"><h2 id="shop-title">Bodega</h2><p id="shop-cash" class="shop-cash"></p><div id="shop-list" class="shop-list"></div><button id="shop-close" type="button" class="travel-close">Done</button></div></section>
+    <section id="travel" class="travel-menu" hidden aria-labelledby="travel-title"><div class="travel-card"><h2 id="travel-title">Where to?</h2><div id="travel-list" class="travel-list"></div><button id="travel-close" type="button" class="travel-close">Stay here</button></div></section>
     <div id="breaking" class="breaking" role="status" aria-live="polite" hidden><b>BREAKING</b><span id="breaking-text"></span></div>
     <div id="boss-bar" class="boss-bar" hidden><div class="boss-head"><strong id="boss-name"></strong><em id="boss-tag"></em></div><small id="boss-title"></small><i><span id="boss-health"></span></i></div>
     <div id="blast-flash" aria-hidden="true"></div>
@@ -119,7 +123,7 @@
   <script src="toy-models.js?v=6"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
-  <script src="game.js?v=22"></script>
+  <script src="game.js?v=28"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
   <script type="module" src="featured-model.js?v=2"></script>
 </body>

@@ -834,7 +834,7 @@
   makeSuburbs();
   const playerBuildingColliders=buildings.concat(upperBuildingColliders);
   // Populated after landmarks are built so traversal only checks nearby geometry.
-  const playerColliderCells=new Map();
+  const playerColliderCells=new Map(),movingColliders=[];
   // Index static footprints once; destroyed buildings are still filtered by
   // insideBuilding, so destruction does not require rebuilding the index.
   const buildingCells=new Map();
@@ -2916,7 +2916,7 @@
       const d=Math.hypot(dx,dz);if(d>reach || Math.abs(dy)>3)continue;
       if(d>.6 && (dx*flat.x+dz*flat.z)/d<.45)continue;
       if(actor.propType==='pressure-tank'){if(detonateTank(actor))hits++;continue;}
-      const car=cars.includes(actor),power=(car?18:24)+(slapChain===3?10:slapChain===2?3:0);
+      const car=cars.includes(actor),power=((car?18:24)+(slapChain===3?10:slapChain===2?3:0))*((progress.owned||[]).includes('gloves')?1.3:1);
       const launch=new THREE.Vector3(flat.x*power,car?9:9+(slapChain===3?6:2)+Math.max(0,forward.y)*10,flat.z*power).addScaledVector(velocity,.5);
       if(actor.webHeld)cancelWebGrab();if(actor.webTether)removeTether(actor.webTether);if(actor.webPinned){clearWebPin(actor);releaseActorWeb(actor);}
       if(actor.knockback) {
@@ -2949,7 +2949,7 @@
         if(elapsed-(boss.zapHint||-9)>4){boss.zapHint=elapsed;worldPopup('ZAP! STUN HIM WITH WEBS FIRST',p.clone().setY(p.y+3.6),'burst oops',2);}
         hits++;continue;
       }
-      damageBoss(a,1,a.state==='subdued'?'BOSS SMACKDOWN':'BOSS SLAP',p.clone().setY(p.y+2.5));hits++;if(a===rhino)hitMetal=true;
+      damageBoss(a,(progress.owned||[]).includes('gloves')?1.5:1,a.state==='subdued'?'BOSS SMACKDOWN':'BOSS SLAP',p.clone().setY(p.y+2.5));hits++;if(a===rhino)hitMetal=true;
       if(boss.status==='active' && a.state!=='subdued'){p.x+=flat.x*2;p.z+=flat.z*2;}
     }
     if(hits){recentDanger={position:position.clone(),time:2.5};velocity.addScaledVector(flat,onGround?1.8:1);flashReticle();impactFeedback(1.5+Math.min(3,hits));playEffect(hitMetal?'metal':'impact');if(hits>=3)awardChaos(250*hits,`MULTI-SLAP x${hits}`,null);}
@@ -3018,7 +3018,7 @@
     if(webGrab===a)cancelWebGrab();clearWebPin(a);
     a.state='subdued';a.stuck=true;a.webRemaining=1e6;
     const wrap=wrapActor(a.group,a);if(a===rhino)wrap.scale.set(2.6,2.2,2.5);else wrap.scale.set(1.35,1.4,1.4);wrap.userData.webActor=a;splatters.push(wrap);
-    awardChaos(5000,`${boss.name} DEFEATED`,p.clone().setY(p.y+4),'hero');burst(p.clone().setY(p.y+3),70,confetti,{speed:12,up:8,life:1.8,size:.35});
+    gainBucks(300);awardChaos(5000,`${boss.name} DEFEATED`,p.clone().setY(p.y+4),'hero');burst(p.clone().setY(p.y+3),70,confetti,{speed:12,up:8,life:1.8,size:.35});
     showBreaking(`${boss.name} DEFEATED`);setNews(`${boss.name} CAPTURED`);
     playEffect('success');impactFeedback(3);adjustOpinion(12);
     addHeat(-2);
@@ -3152,7 +3152,7 @@
   try{Object.assign(progress,JSON.parse(localStorage.getItem('spida.progress')||'{}'));}catch(_){/* Start fresh when storage is unavailable. */}
   function saveProgress(){try{localStorage.setItem('spida.progress',JSON.stringify(progress));}catch(_){/* Progress then lasts this session. */}}
   const unlocks=[[2,'doubleJump','DOUBLE JUMP'],[3,'suit:symbiote','SYMBIOTE SUIT'],[4,'groundPound','GROUND POUND (slap in midair)'],[5,'suit:iron','IRON SPIDER SUIT'],[6,'quickZip','FASTER WEB ZIPS'],[7,'suit:pajamas','PAJAMA SUIT'],[8,'quickFinisher','FASTER FINISHERS'],[9,'suit:noir','NOIR SUIT'],[10,'suit:gold','GOLDEN MENACE SUIT']];
-  const has=key=>unlocks.some(([level,k])=>k===key && progress.level>=level);
+  const has=key=>(progress.owned||[]).includes(key)||unlocks.some(([level,k])=>k===key && progress.level>=level);
   const xpForLevel=level=>Math.round(2500*(1+.35*(level-1)));
   function gainXp(amount) {
     progress.xp+=Math.min(3000,amount);
@@ -3192,6 +3192,7 @@
   }
   function damagePlayer(amount) {
     if(koTimer>0 || amount<=0)return;
+    if((progress.owned||[]).includes('lining'))amount*=.75;
     playerHp=Math.max(0,playerHp-amount);hurtTimer=4;
     shell.classList.remove('hurt');void shell.offsetWidth;shell.classList.add('hurt');
     if(playerHp<=0)knockOut();
@@ -3286,7 +3287,7 @@
     const ended=crime;crime=null;crimeBeacon.visible=false;crimeTimer=45+Math.random()*30;
     if(ended.victim){ended.victim.crimeVictim=false;ended.victim.leftArm.rotation.x=ended.victim.rightArm.rotation.x=0;if(success)say(ended.victim,'saved');}
     if(success) {
-      stats.crimes++;addHeat(-1);awardChaos(900,`${ended.type.name} STOPPED`,new THREE.Vector3(ended.x,3,ended.z),'hero');
+      stats.crimes++;addHeat(-1);gainBucks(50);awardChaos(900,`${ended.type.name} STOPPED`,new THREE.Vector3(ended.x,3,ended.z),'hero');
       setNews(`${ended.type.name} STOPPED IN ${districtName(ended.x,ended.z)}`);
     } else if(!silent)showBreaking('CRIMINALS ESCAPED');
     // Defeated crooks lie around a bit before the city tidies them up.
@@ -3394,7 +3395,7 @@
     'DOWNTOWN BROOKLYN':'Like Manhattan, but it will fight you about it','CONEY ISLAND':'Hot dogs, sand, and questionable rides'};
   let currentDistrict='',districtTimer=0,districtHideTimer=null;
   function updateDistrict(dt) {
-    districtTimer-=dt;if(districtTimer>0)return;districtTimer=.5;
+    districtTimer-=dt;if(districtTimer>0 || currentArea)return;districtTimer=.5;
     const name=waterAt(position.x,position.z)?(position.x<0?'THE HUDSON':'THE EAST RIVER'):districtName(position.x,position.z);
     if(!name || name===currentDistrict)return;
     currentDistrict=name;if(!districtHud)return;
@@ -3556,7 +3557,7 @@
     spotted=heat>0 && (cops.some(c=>c.active && !c.defeated && c.group.position.distanceToSquared(position)<45*45)||cruisers.some(c=>c.active && c.group.position.distanceToSquared(position)<45*45)||(policeHeli.active && Math.hypot(heliPos.x-position.x,heliPos.z-position.z)<40));
     if(heat>0 && (spotted || heatHold>0))lastSeen.copy(position);
     const pursuit=spotted;
-    if(heatHold<=0 && heat>0){heat=Math.max(0,heat-dt*(spotted?.03:.25));updateHeatHud();}
+    if(heatHold<=0 && heat>0){heat=Math.max(0,heat-dt*(spotted?.03:.25)*((progress.owned||[]).includes('lawyer')?2:1));updateHeatHud();}
     heatHud?.classList.toggle('pursuit',pursuit && heat>0);
     const level=stars(),wantCops=[0,2,4,5,6,8][level];
     const activeCops=cops.filter(c=>c.active);
@@ -3609,8 +3610,8 @@
   // ---- Player settings: look, field of view, volume, motion and key bindings ----
   const settings={sensitivity:1,fov:72,music:.8,effects:1,invert:false,reduceMotion:false};
   try{Object.assign(settings,JSON.parse(localStorage.getItem('spida.settings')||'{}'));}catch(_){/* Defaults. */}
-  const defaultKeys={zip:'KeyE',slap:'KeyF',dodge:'KeyC',camera:'KeyV',slowmo:'KeyT',photo:'KeyP',nuke:'KeyN',reset:'KeyR'};
-  const keyLabels={zip:'Web zip',slap:'Spider-slap',dodge:'Dodge',camera:'Switch camera',slowmo:'Slow motion',photo:'Photo mode',nuke:'Nuke',reset:'Reset'};
+  const defaultKeys={interact:'KeyG',zip:'KeyE',slap:'KeyF',dodge:'KeyC',camera:'KeyV',slowmo:'KeyT',photo:'KeyP',nuke:'KeyN',reset:'KeyR'};
+  const keyLabels={interact:'Interact',zip:'Web zip',slap:'Spider-slap',dodge:'Dodge',camera:'Switch camera',slowmo:'Slow motion',photo:'Photo mode',nuke:'Nuke',reset:'Reset'};
   let keyBindings={...defaultKeys};
   try{Object.assign(keyBindings,JSON.parse(localStorage.getItem('spida.keys')||'{}'));}catch(_){/* Defaults. */}
   function saveSettings(){try{localStorage.setItem('spida.settings',JSON.stringify(settings));localStorage.setItem('spida.keys',JSON.stringify(keyBindings));}catch(_){/* Session only. */}}
@@ -3878,6 +3879,12 @@
     brooklyn:{shift:-5,lead:'square',chords:[[48,51,55,58],[44,48,51,55],[46,50,53,56],[43,47,50,53]]},
     harlem:{shift:2,lead:'sine',chords:[[48,52,55,59],[45,48,52,55],[50,53,57,60],[43,47,50,53]]}
   };
+  // A shared second of white noise for drums and rain.
+  let whiteNoiseBuffer=null;
+  function whiteNoise() {
+    if(!whiteNoiseBuffer && soundContext){whiteNoiseBuffer=soundContext.createBuffer(1,soundContext.sampleRate,soundContext.sampleRate);const data=whiteNoiseBuffer.getChannelData(0);for(let i=0;i<data.length;i++)data[i]=Math.random()*2-1;}
+    return whiteNoiseBuffer;
+  }
   function musicStyleFor() {
     const area=currentDistrict||'';
     return /BROOKLYN|DUMBO|CONEY/.test(area)?musicStyles.brooklyn:/HARLEM/.test(area)?musicStyles.harlem:musicStyles.manhattan;
@@ -3890,7 +3897,7 @@
       gain.gain.setValueAtTime(.11,time);gain.gain.exponentialRampToValueAtTime(.0001,time+.18);
       voice.connect(gain);gain.connect(musicBus);voice.start(time);voice.stop(time+.2);return;
     }
-    if(!noiseBuffer)return;
+    const noiseBuffer=whiteNoise();if(!noiseBuffer)return;
     const noise=soundContext.createBufferSource(),filter=soundContext.createBiquadFilter(),gain=soundContext.createGain(),hat=kind==='hat';
     noise.buffer=noiseBuffer;filter.type=hat?'highpass':'bandpass';filter.frequency.value=hat?7000:1800;
     gain.gain.setValueAtTime(hat?.012:.045,time);gain.gain.exponentialRampToValueAtTime(.0001,time+(hat?.04:.13));
@@ -4116,7 +4123,7 @@
     const direction=hit.point.clone().sub(position.clone().add(new THREE.Vector3(0,1.3,0)));
     if(direction.lengthSq()<4)return false;
     playEffect('zip');direction.normalize();velocity.addScaledVector(direction,mutators.rocket?56:28);if(onGround)velocity.y=Math.max(velocity.y,4);
-    onGround=false;zipAnchor=hit.point.clone();zipTime=.22;zipCooldown=has('quickZip')?.28:.55;noteAirMove('zips');showWeb(true);flashReticle();return true;
+    onGround=false;zipAnchor=hit.point.clone();zipTime=.22;zipCooldown=(has('quickZip')?.28:.55)*((progress.owned||[]).includes('fluid')?.6:1);noteAirMove('zips');showWeb(true);flashReticle();return true;
   }
   function swing(start, aimX=0, aimY=0) {
     if (!start) { if(rope){playEffect('release');if(rope.age>.2){velocity.x*=1.035;velocity.z*=1.035;}}keys.swing=false; rope=null; showWeb(false); anchorMarker.visible=false;if(reticle)reticle.classList.remove('active'); return; }
@@ -5217,7 +5224,7 @@
       success=Boolean((actor.webPinned && actor.webPinned.elapsed>=actor.webPinned.duration) || (actor.stuck && !actor.webPinned && actor.currentSpeed<1));
       failed=event.time>20 || event.hits.size>=2;
     }
-    if(success||failed){const where=actor.group.position.clone().setY(actor.group.position.y+2.5);if(success){awardChaos(event.type==='fall'?800:600,'HERO MOMENT',where,'hero');burst(where,40,confetti,{speed:9,up:6,life:1.4,size:.3});if(event.type==='fall')say(actor,'saved');}else awardChaos(400,event.type==='fall'?'MORAL FLEXIBILITY':'NOT MY PROBLEM',where,'oops');playEffect(success?'success':'failure');event.result=success?'success':'failed';event.time=0;event.marker.material.color.setHex(success?0x75ed9d:0xd65b50);}
+    if(success||failed){const where=actor.group.position.clone().setY(actor.group.position.y+2.5);if(success){gainBucks(40);awardChaos(event.type==='fall'?800:600,'HERO MOMENT',where,'hero');burst(where,40,confetti,{speed:9,up:6,life:1.4,size:.3});if(event.type==='fall')say(actor,'saved');}else awardChaos(400,event.type==='fall'?'MORAL FLEXIBILITY':'NOT MY PROBLEM',where,'oops');playEffect(success?'success':'failure');event.result=success?'success':'failed';event.time=0;event.marker.material.color.setHex(success?0x75ed9d:0xd65b50);}
   }
   // Short ambient incidents use existing actors and physics, so the player can intervene.
   let cityEvent=null,cityEventTimer=14,cityEventSequence=0;
@@ -5921,7 +5928,7 @@
       rope.anchorVelocity.copy(anchorEnd).sub(anchorStart).multiplyScalar(dt>0?1/dt:0);
     }
     const frameStart=position.clone(),wasGrounded=onGround,wasGliding=glideEngaged,input=movement(),fallSpeed=-velocity.y;
-    updateChaos(dt);updateParticles(dt);updateBosses(dt);updateActivities(dt);updateHero(dt);updatePolice(dt);updateHints(dt);slapCooldown=Math.max(0,slapCooldown-dt);slapAnimation=Math.max(0,slapAnimation-dt);slapChainTimer=Math.max(0,slapChainTimer-dt);screenShake=Math.max(0,screenShake-dt*2.5);updateMutators(dt);
+    updateChaos(dt);updateParticles(dt);updateBosses(dt);updateActivities(dt);updateHero(dt);updatePolice(dt);updateHints(dt);updateAreas(dt);slapCooldown=Math.max(0,slapCooldown-dt);slapAnimation=Math.max(0,slapAnimation-dt);slapChainTimer=Math.max(0,slapChainTimer-dt);screenShake=Math.max(0,screenShake-dt*2.5);updateMutators(dt);
     if(slapQueue>0){slapQueue=Math.max(0,slapQueue-dt);if(slapCooldown===0 && slapQueue>0){slapQueue=0;spiderSlap();}}
     jumpBuffer=Math.max(0,jumpBuffer-dt);coyoteTime=wasGrounded?.12:Math.max(0,coyoteTime-dt);
     if(input.lengthSq())input.normalize();
@@ -5960,7 +5967,7 @@
       const drag=Math.exp(-(wading?5:onGround?4:rope?.025:gliding?0:.08)*step);
       velocity.x*=drag;velocity.z*=drag;
       if(onGround) {
-        const horizontal=Math.hypot(velocity.x,velocity.z),limit=wading?3.5:keys.sprint?18:9;
+        const horizontal=Math.hypot(velocity.x,velocity.z),limit=wading?3.5:keys.sprint?((progress.owned||[]).includes('sneakers')?21.5:18):9;
         if(horizontal>limit){const eased=limit+(horizontal-limit)*Math.exp(-3*step);velocity.x*=eased/horizontal;velocity.z*=eased/horizontal;}
       }
       velocity.y-=18*gravityScale*step;
@@ -6027,7 +6034,8 @@
       const wet=waterAt(position.x,position.z),groundHeight=wet?wet.floor:parkElevation(position.x,position.z);
       if(position.y<=groundHeight){position.y=groundHeight;velocity.y=Math.max(0,velocity.y);onGround=true;}
       const playerCell=playerColliderCells.get(`${Math.floor(position.x/40)},${Math.floor(position.z/40)}`)||[];
-      for(const b of playerCell) {
+      // Moving platforms (the subway train) are checked every step, outside the static grid.
+      for(const list of [playerCell,movingColliders])for(const b of list) {
         if(position.y<(b.bottom||0)-.05)continue;
         const inside=insideBuilding(position.x,position.z,b,.4);
         if(!inside)continue;
@@ -6064,6 +6072,7 @@
         }
       }
       resolvePlayerActors();
+      if(currentArea && position.y>currentArea.ceiling-1.8){position.y=currentArea.ceiling-1.8;velocity.y=Math.min(0,velocity.y);}
       if(onGround){wallRunTime=0;wallContact=null;}
       position.x=THREE.MathUtils.clamp(position.x,worldMinX,worldMaxX);position.z=THREE.MathUtils.clamp(position.z,worldMinZ,worldMaxZ);
     }
@@ -6384,6 +6393,7 @@
     // Bake the chosen filter into the saved image.
     const out=document.createElement('canvas');out.width=canvas.width;out.height=canvas.height;const context=out.getContext('2d');
     context.filter=photoFilters[photoMode.filter][1];context.drawImage(canvas,0,0);
+    sellPhoto();
     out.toBlob(blob=>{if(!blob)return;const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`skyline-swing-${Date.now()}.png`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2000);});
     playEffect('success');
   }
@@ -6397,7 +6407,7 @@
   }
   function frame(t) { const raw=Math.min((t-last)/1000||0,.033); last=t;if(titleOpen){drawTitle(raw);requestAnimationFrame(frame);return;}if(photoMode){drawPhoto(raw);requestAnimationFrame(frame);return;}if(paused){requestAnimationFrame(frame);return;} timeScale+=((slowMotion||dodgeSlow>0?.3:1)-timeScale)*(1-Math.exp(-10*raw));let dt=raw*timeScale;if(hitStop>0){hitStop-=raw;dt*=.06;} update(dt);drawFrame(dt);requestAnimationFrame(frame); }
   const map={KeyW:'forward',ArrowUp:'forward',KeyS:'back',ArrowDown:'back',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right'};
-  window.addEventListener('keydown',e=>{ const code=remapKey(e.code); if(photoMode){photoKey(e,true);return;} if(code==='KeyP'&&!e.repeat&&!titleOpen&&!paused){togglePhotoMode();return;} if(e.code==='Tab'){e.preventDefault();opinionPanel?.classList.add('held');return;} if(titleOpen){if(e.code==='Enter'){e.preventDefault();startGame();}return;} if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(code==='KeyR'&&!e.repeat)reset(); if(code==='KeyV'&&!e.repeat)toggleCameraMode(); if(code==='KeyE'&&!e.repeat)webZip(); if(code==='KeyC'&&!e.repeat)dodge(); if(code==='KeyN'&&!e.repeat)launchNuke(); if((code==='KeyF'||code==='KeyQ')&&!e.repeat)spiderSlap(); if(code==='KeyT'){slowMotion=true;document.querySelector('.game-shell').classList.add('slowmo');} if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
+  window.addEventListener('keydown',e=>{ const code=remapKey(e.code); if(photoMode){photoKey(e,true);return;} if(code==='KeyP'&&!e.repeat&&!titleOpen&&!paused){togglePhotoMode();return;} if(uiOpen){if(e.code==='Escape'){e.preventDefault();if(!document.getElementById('shop').hidden)closeShop();else closeTravel();}else if(!document.getElementById('shop').hidden && /^Digit[1-9]$/.test(e.code)){document.querySelectorAll('#shop-list button')[+e.code.slice(5)-1]?.click();}else if(/^Digit[1-9]$/.test(e.code))document.querySelectorAll('#travel-list button')[+e.code.slice(5)-1]?.click();return;} if(code==='KeyG'&&!e.repeat&&!titleOpen&&!paused){interact();} if(e.code==='Tab'){e.preventDefault();opinionPanel?.classList.add('held');return;} if(titleOpen){if(e.code==='Enter'){e.preventDefault();startGame();}return;} if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(code==='KeyR'&&!e.repeat)reset(); if(code==='KeyV'&&!e.repeat)toggleCameraMode(); if(code==='KeyE'&&!e.repeat)webZip(); if(code==='KeyC'&&!e.repeat)dodge(); if(code==='KeyN'&&!e.repeat)launchNuke(); if((code==='KeyF'||code==='KeyQ')&&!e.repeat)spiderSlap(); if(code==='KeyT'){slowMotion=true;document.querySelector('.game-shell').classList.add('slowmo');} if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
   window.addEventListener('keyup',e=>{ const code=remapKey(e.code); if(photoMode){photoKey(e,false);return;} if(e.code==='Tab')opinionPanel?.classList.remove('held'); if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; if(code==='KeyT'){slowMotion=false;document.querySelector('.game-shell').classList.remove('slowmo');} });
   window.addEventListener('blur',()=>{ Object.keys(keys).forEach(k=>keys[k]=false); cancelWebGrab();swing(false); });
   canvas.addEventListener('pointerdown',e=>{
@@ -6420,7 +6430,7 @@
   let touchX=0,touchY=0;
   canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'){touchX=e.clientX;touchY=e.clientY;}});
   canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse' && e.buttons){yaw-=(e.clientX-touchX)*.005*settings.sensitivity;pitch=THREE.MathUtils.clamp(pitch-(e.clientY-touchY)*.005*settings.sensitivity*(settings.invert?-1:1),-1.35,1.35);touchX=e.clientX;touchY=e.clientY;}});
-  document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(!locked && pointerWasLocked && !paused){pointerUnlockTime=performance.now();setPaused(true,true);}pointerWasLocked=locked;if(!locked && !paused){cancelWebGrab();swing(false);}});
+  document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(!locked && pointerWasLocked && !paused && !uiOpen){pointerUnlockTime=performance.now();setPaused(true,true);}pointerWasLocked=locked;if(!locked && !paused){cancelWebGrab();swing(false);}});
   for (const id of ['forward','back','left','right','sprint','jump','swing','bomb','zip','slap','dodge']) {
     const button=document.getElementById(id);
     button.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();button.setPointerCapture(e.pointerId);if(id==='jump')jump();else if(id==='swing')beginWebAction();else if(id==='bomb')fireBomb();else if(id==='zip')webZip();else if(id==='slap')spiderSlap();else if(id==='dodge')dodge();else keys[id]=true;});
@@ -6529,7 +6539,7 @@
       if(spot.distanceToSquared(position.clone().setY(position.y+1))<2.6*2.6) {
         pizzaCollected.add(i);try{localStorage.setItem('spida.pizza',JSON.stringify([...pizzaCollected]));}catch(_){/* Session only. */}
         playEffect('success');burst(spot,40,[0xffc83a,0xff5a36,0xffffff],{speed:8,up:5,life:1,size:.35});
-        awardChaos(500,`GOLDEN PIZZA ${pizzaCollected.size}/${pizzaSpots.length}`,spot.clone(),'hero');
+        gainBucks(25);awardChaos(500,`GOLDEN PIZZA ${pizzaCollected.size}/${pizzaSpots.length}`,spot.clone(),'hero');
         worldPopup(pick(['Still warm?!','Pigeon-tested','Rooftop pizza hits different','Only slightly radioactive','Worth the climb','Grease = power']),spot.clone().setY(spot.y+1),'speech',2);
         if(pizzaCollected.size===pizzaSpots.length)showBreaking('ALL 40 PIZZAS FOUND');
         updateActivityHud();
@@ -6578,7 +6588,7 @@
       if(race.index>=race.course.rings.length) {
         const time=race.time,[gold,silver,bronze]=race.course.par,medal=time<=gold?'GOLD':time<=silver?'SILVER':time<=bronze?'BRONZE':'PARTICIPATION';
         const record=!race.course.best || time<race.course.best;if(record){race.course.best=time;try{localStorage.setItem(`spida.race.${race.course.name}`,String(time));}catch(_){/* Session only. */}}
-        awardChaos(medal==='GOLD'?3000:medal==='SILVER'?2000:medal==='BRONZE'?1200:300,`${medal} ${time.toFixed(1)}s`,raceRing.position.clone(),'hero');
+        gainBucks(medal==='GOLD'?150:medal==='SILVER'?100:medal==='BRONZE'?60:10);awardChaos(medal==='GOLD'?3000:medal==='SILVER'?2000:medal==='BRONZE'?1200:300,`${medal} ${time.toFixed(1)}s`,raceRing.position.clone(),'hero');
         showBreaking(`${race.course.name}: ${time.toFixed(2)}s, ${medal}${record?' (NEW RECORD)':''}`);
         burst(raceRing.position,80,confetti,{speed:14,up:8,life:1.8,size:.35});playEffect('success');
         raceRing.visible=raceNext.visible=false;race=null;raceCooldown=4;updateActivityHud();return;
@@ -6669,7 +6679,7 @@
   }
   let rainSound=null;
   function updateRainSound() {
-    if(!soundContext || soundContext.state!=='running' || !noiseBuffer)return;
+    const noiseBuffer=whiteNoise();if(!soundContext || soundContext.state!=='running' || !noiseBuffer)return;
     if(!rainSound) {
       const source=soundContext.createBufferSource(),filter=soundContext.createBiquadFilter(),gain=soundContext.createGain();
       source.buffer=noiseBuffer;source.loop=true;filter.type='lowpass';filter.frequency.value=1600;gain.gain.value=0;
@@ -6785,6 +6795,378 @@
     updateBalloon(dt);
     for(const boat of boats){boat.group.position.set(boat.x(elapsed),-.25+Math.sin(elapsed*1.3)*.08,boat.z(elapsed));boat.group.rotation.y=boat.heading(elapsed);}
   }
+  // ---- Enterable areas: built high above the outer water so they never meet the city ----
+  const fadeLayer=document.getElementById('fade'),interactPrompt=document.getElementById('interact');
+  const entrances=[],interactables=[];let currentArea=null,areaTransition=false,uiOpen=false;
+  function areaBox(area,w,h,d,color,x,y,z,{collide=true,walkable=false,grapple=false,material=null}={}) {
+    const b=new ToyKit.Builder();b.add(ToyKit.roundedBox(w,h,d,Math.min(.08,w/4,h/4,d/4),1),color);
+    const mesh=b.mesh(material||ToyKit.toyMaterial);mesh.position.set(x,y,z);mesh.castShadow=false;mesh.receiveShadow=true;area.group.add(mesh);
+    if(collide){const c={x,z,w,d,bottom:y-h/2,height:y+h/2,walkable};playerBuildingColliders.push(c);area.colliders.push(c);}
+    if(grapple)grappleMeshes.push(mesh);
+    return mesh;
+  }
+  function makeArea(name,origin,ceiling) {
+    const group=new THREE.Group();group.userData.skyline=true;scene.add(group);
+    const area={name,origin,ceiling,group,colliders:[],update:null,onEnter:null,exits:[]};return area;
+  }
+  function fadeThen(action) {
+    if(areaTransition)return;areaTransition=true;fadeLayer?.classList.add('on');
+    setTimeout(()=>{action();setTimeout(()=>{fadeLayer?.classList.remove('on');areaTransition=false;},120);},380);
+  }
+  function teleportPlayer(point,facing=null) {
+    if(rope)swing(false);cancelWebGrab();
+    position.copy(point);previous.copy(point);velocity.set(0,0,0);onGround=false;if(facing!==null)yaw=facing;
+    updateCityLod(0,true);updateSceneDetail(true);
+  }
+  function enterArea(area,spawn,facing,from) {
+    fadeThen(()=>{currentArea=area;area.returnPoint=from?.exit||position.clone();area.returnFacing=from?.facing??yaw;teleportPlayer(spawn,facing);area.onEnter?.(from);document.querySelector('.game-shell').classList.add('in-area');});
+  }
+  function leaveArea(point=null,facing=null) {
+    const area=currentArea;if(!area)return;
+    fadeThen(()=>{currentArea=null;teleportPlayer(point||area.returnPoint,facing??area.returnFacing);area.onLeave?.();document.querySelector('.game-shell').classList.remove('in-area');});
+  }
+  function addEntrance(label,point,radius,action,exitPoint,facing) {const entrance={label,point,radius,action,exit:exitPoint,facing};entrances.push(entrance);interactables.push(entrance);return entrance;}
+  function nearestInteractable() {
+    let best=null,bestDistance=Infinity;
+    for(const item of interactables) {
+      if(item.enabled && !item.enabled())continue;
+      const d=item.point.distanceTo(position);if(d<item.radius && d<bestDistance){best=item;bestDistance=d;}
+    }
+    return best;
+  }
+  function interact() {
+    if(areaTransition || uiOpen || titleOpen || paused)return;
+    const target=nearestInteractable();if(target)target.action(target);
+  }
+  function updateInteractPrompt() {
+    const target=!areaTransition && !uiOpen?nearestInteractable():null;
+    if(!interactPrompt)return;
+    interactPrompt.hidden=!target;if(target)interactPrompt.textContent=`${touchDevice?'Tap':keyName(keyBindings.interact)}: ${target.label}`;
+  }
+  // A street kiosk: railings around a stairwell, two globe lamps and a sign.
+  function streetKiosk(point,facing,sign,color,lamp) {
+    const b=new ToyKit.Builder();
+    b.add(ToyKit.roundedBox(2.6,.1,3.6,.04),'#1c1f22',{p:[0,.05,0]});
+    for(const side of [-1,1]){b.rod([side*1.3,0,-1.8],[side*1.3,1.1,-1.8],.04,color);b.rod([side*1.3,0,1.8],[side*1.3,1.1,1.8],.04,color);b.rod([side*1.3,1.1,-1.8],[side*1.3,1.1,1.8],.04,color);}
+    b.rod([-1.3,1.1,1.8],[1.3,1.1,1.8],.04,color);
+    for(const side of [-1,1]){b.rod([side*1.3,1.1,-1.8],[side*1.3,2.4,-1.8],.04,color);b.add(ToyKit.sphere(.2,12,8),lamp,{p:[side*1.3,2.55,-1.8]});}
+    const group=new THREE.Group();group.add(b.mesh());group.position.copy(point);group.rotation.y=facing;scene.add(group);
+    const board=new THREE.Mesh(new THREE.PlaneGeometry(2.4,.5),displayMaterial(sign,'',color==='#1d5c3a'?'#176b4c':'#3a2b1d'));board.position.set(0,1.75,-1.82);group.add(board);
+    const back=board.clone();back.rotation.y=Math.PI;back.position.z=-1.84;group.add(back);
+    return group;
+  }
+  // ---- Subway: stations across the city share one platform and a tunnel ----
+  const subwayArea=makeArea('SUBWAY',new THREE.Vector3(720,600,-600),606.5);
+  const subwayStations=[['HARLEM 125 ST',-33.6,-551],['TIMES SQ 42 ST',47,214],['UNION SQ 14 ST',86.4,529],['WALL ST',46.4,849],['DUMBO YORK ST',446.4,809],['CONEY ISLAND',606.4,1049]];
+  {
+    const a=subwayArea,o=a.origin,tile='#e9e4d8',band='#1d5c3a';
+    // Platform, edge strip, back wall with a tiled band, ceiling and the track pit.
+    areaBox(a,7,1,90,'#8c8f93',o.x-4.5,o.y-.5,o.z,{walkable:true});
+    areaBox(a,.5,.04,90,'#e8c33a',o.x-1.25,o.y+.02,o.z,{collide:false});
+    areaBox(a,1,8,90,tile,o.x-8.5,o.y+3,o.z,{grapple:true});
+    areaBox(a,.2,1.2,90,band,o.x-7.95,o.y+2.2,o.z,{collide:false});
+    areaBox(a,22,1,1200,'#3a3d40',o.x+2,o.y+7,o.z+500,{collide:false,grapple:true});
+    areaBox(a,8,1,1200,'#2b2722',o.x+3,o.y-2.3,o.z+500,{walkable:true});
+    areaBox(a,1,10,1200,'#3d3a36',o.x+7.5,o.y+2,o.z+500,{grapple:true});
+    areaBox(a,1,10,1110,'#3d3a36',o.x-8.5,o.y+2,o.z+555,{collide:true});
+    areaBox(a,16,10,1,'#3d3a36',o.x,o.y+2,o.z-46,{});
+    for(const x of [o.x+1.2,o.x+4.8])areaBox(a,.12,.14,1200,'#9aa2a6',x,o.y-1.73,o.z+500,{collide:false});
+    for(let z=-40;z<=40;z+=10){areaBox(a,.45,7,.45,'#2f6b4f',o.x-1.6,o.y+3.5,o.z+z,{grapple:true});}
+    for(let z=-30;z<=30;z+=20)areaBox(a,2.4,.5,.6,'#6b4a2e',o.x-6.6,o.y+.5,o.z+z,{walkable:true});
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(10,1.2),displayMaterial('SKYLINE LINE','Downtown and Brooklyn','#1d5c3a'));sign.position.set(o.x-7.9,o.y+4.6,o.z);sign.rotation.y=Math.PI/2;a.group.add(sign);
+    // Tunnel lights run the length of the line.
+    const lights=new THREE.InstancedMesh(new THREE.BoxGeometry(.2,.3,1.2),new THREE.MeshBasicMaterial({color:0xffd98a,toneMapped:false}),120),t=new THREE.Object3D();
+    for(let i=0;i<120;i++){t.position.set(o.x+6.9,o.y+4,o.z+40+i*9);t.updateMatrix();lights.setMatrixAt(i,t.matrix);}
+    a.group.add(lights);
+    // Exit stairs at the back of the platform.
+    areaBox(a,3,.4,4,'#6c6f73',o.x-6.5,o.y+.2,o.z-40,{collide:false});
+    a.exits.push(o.clone().add(new THREE.Vector3(-6,1,-40)));
+  }
+  // The train: three silver cars with blue stripes and a walkable roof.
+  const train=(()=>{
+    const b=new ToyKit.Builder();
+    for(let car=0;car<3;car++) {
+      const z=(car-1)*18.5;
+      b.add(ToyKit.roundedBox(3,3.6,18,.35),'#b9c0c4',{p:[0,0,z]});
+      for(const side of [-1,1]){b.add(ToyKit.roundedBox(.06,.35,17.6,.03),'#2a5cbf',{p:[side*1.52,-.6,z]});for(let w=-3;w<=3;w++)b.add(ToyKit.roundedBox(.06,.9,1.6,.05),'#20262c',{p:[side*1.52,.55,z+w*2.3]});}
+    }
+    b.add(ToyKit.roundedBox(2.4,1.4,.1,.05),'#20262c',{p:[0,.5,-27.6]});
+    const group=new THREE.Group(),mesh=b.mesh(ToyKit.metalMaterial);group.add(mesh);subwayArea.group.add(group);
+    const roof={x:subwayArea.origin.x+3,z:0,w:3,d:55,bottom:subwayArea.origin.y-2,height:subwayArea.origin.y+1.6,walkable:true};
+    movingColliders.push(roof);
+    return {group,roof,z:-700,speed:0,state:'arriving',timer:0,surfing:false,surfScore:0};
+  })();
+  const trainStop=-600,trainEnd=230;
+  const trainObstacles=[];
+  for(let z=-500;z<trainEnd-20;z+=34+Math.round(random(z)*22)) {
+    const box=areaBox(subwayArea,3.4,.9,.7,'#c9a227',subwayArea.origin.x+3,subwayArea.origin.y+2.05,z,{});trainObstacles.push(box);
+  }
+  function updateTrain(dt) {
+    const o=subwayArea.origin,t=train,oldZ=t.z;
+    if(t.state==='arriving'){t.speed=Math.max(3,(trainStop-t.z)*.55);t.z=Math.min(trainStop,t.z+t.speed*dt);if(t.z>=trainStop){t.state='stopped';t.timer=8;t.speed=0;}}
+    else if(t.state==='stopped'){t.timer-=dt;if(t.timer<=0){t.state='departing';t.surfing=onTrainRoof();if(t.surfing){showBreaking('HOLD ON. JUMP THE SIGNAL BOXES.');}}}
+    else if(t.state==='departing'){t.speed=Math.min(22,t.speed+5*dt);t.z+=t.speed*dt;if(t.z>trainEnd){if(t.surfing)finishSurf(true);t.state='away';t.timer=6;}}
+    else if(t.state==='away'){t.timer-=dt;if(t.timer<=0){t.state='arriving';t.z=-700;}}
+    t.group.position.set(o.x+3,o.y-.2,t.z);t.roof.z=t.z;
+    // A rider on the roof moves with the train.
+    if(currentArea===subwayArea && onTrainRoof())position.z+=t.z-oldZ;
+    if(t.surfing && t.state==='departing') {
+      if(position.y<o.y+.6)finishSurf(false);
+      else{t.surfScore+=dt;}
+    }
+  }
+  function onTrainRoof(){const o=subwayArea.origin;return currentArea===subwayArea && Math.abs(position.x-(o.x+3))<1.7 && Math.abs(position.z-train.z)<28 && position.y>o.y+.9 && position.y<o.y+2.6;}
+  function finishSurf(success) {
+    train.surfing=false;
+    if(success){awardChaos(1500,'SUBWAY SURFER',null,'trick');gainBucks(60);const station=subwayStations[Math.floor(Math.random()*subwayStations.length)];travelTo(station);}
+    else{showBreaking('KNOCKED OFF THE TRAIN');fadeThen(()=>teleportPlayer(subwayArea.origin.clone().add(new THREE.Vector3(-4,1,-30)),Math.PI));}
+  }
+  // Riding inside picks a destination station.
+  const travelMenu=document.getElementById('travel'),travelList=document.getElementById('travel-list');
+  function travelTo([name,x,z]) {
+    closeTravel();
+    const exit=new THREE.Vector3(x+2.5,.5,z);
+    fadeThen(()=>{currentArea=null;document.querySelector('.game-shell').classList.remove('in-area');teleportPlayer(exit,Math.PI/2);showBreaking(name);});
+  }
+  function openTravel() {
+    if(!travelMenu)return;uiOpen=true;travelMenu.hidden=false;travelList.innerHTML='';
+    subwayStations.forEach((station,i)=>{const button=document.createElement('button');button.type='button';button.textContent=`${i+1}. ${station[0]}`;button.addEventListener('click',()=>travelTo(station));travelList.appendChild(button);});
+    if(document.pointerLockElement===canvas)document.exitPointerLock();
+  }
+  function closeTravel() {
+    if(!travelMenu)return;uiOpen=false;travelMenu.hidden=true;
+    if(!touchDevice && canvas.requestPointerLock){const request=canvas.requestPointerLock();if(request?.catch)request.catch(()=>{});}
+  }
+  document.getElementById('travel-close')?.addEventListener('click',closeTravel);
+  // Street entrances lead down to the platform; the stairs at the back lead up again.
+  for(const [name,x,z] of subwayStations) {
+    const point=new THREE.Vector3(x,.45,z);
+    if(name!=='TIMES SQ 42 ST')streetKiosk(point,0,'SUBWAY','#1d5c3a','#7fdc9a');
+    addEntrance(`Enter ${name} station`,point,3,()=>enterArea(subwayArea,subwayArea.origin.clone().add(new THREE.Vector3(-5,1,-34)),Math.PI,{exit:new THREE.Vector3(x+3,.5,z),facing:Math.PI/2}),null,0);
+  }
+  interactables.push({label:'Climb the stairs to the street',point:subwayArea.exits[0],radius:3.5,enabled:()=>currentArea===subwayArea,action:()=>leaveArea()});
+  interactables.push({label:'Board the train',get point(){return new THREE.Vector3(subwayArea.origin.x-1,subwayArea.origin.y+1,THREE.MathUtils.clamp(position.z,train.z-26,train.z+26));},radius:2.6,enabled:()=>currentArea===subwayArea && train.state==='stopped' && position.y<subwayArea.origin.y+1.6,action:openTravel});
+  // ---- Museum of Natural History: indoor swinging, a T. rex, a whale and a laser vault ----
+  const museumArea=makeArea('MUSEUM',new THREE.Vector3(690,600,-280),626);
+  const lasers=[];let fossilTaken=false;
+  try{fossilTaken=localStorage.getItem('spida.fossil')==='1';}catch(_){/* Not taken yet. */}
+  {
+    const a=museumArea,o=a.origin,marble='#e7e1d4',trim='#b9ad97';
+    areaBox(a,34,1,74,'#cfc6b4',o.x,o.y-.5,o.z,{walkable:true});
+    for(const side of [-1,1])areaBox(a,1,27,74,marble,o.x+side*17,o.y+13,o.z,{grapple:true});
+    areaBox(a,34,27,1,marble,o.x,o.y+13,o.z-37,{grapple:true});areaBox(a,34,27,1,marble,o.x,o.y+13,o.z+37,{grapple:true});
+    areaBox(a,34,1,74,'#d9d2c2',o.x,o.y+26.5,o.z,{collide:false,grapple:true});
+    // Ceiling beams and columns are anchors for swinging around the hall.
+    for(let z=-30;z<=30;z+=10)areaBox(a,32,1.2,.9,trim,o.x,o.y+24,o.z+z,{collide:false,grapple:true});
+    for(const side of [-1,1])for(let z=-28;z<=28;z+=14){areaBox(a,1.6,26,1.6,trim,o.x+side*13,o.y+13,o.z+z,{grapple:true});}
+    // A mezzanine runs along both long walls.
+    for(const side of [-1,1]){areaBox(a,4,.5,70,'#bdb3a0',o.x+side*15,o.y+9,o.z,{walkable:true});areaBox(a,.2,1.1,70,'#7a6a52',o.x+side*13,o.y+9.8,o.z,{collide:false});}
+    // T. rex skeleton built from bone segments.
+    const bones=new ToyKit.Builder(),bone='#e9dfc6',cx=o.x,cz=o.z-6;
+    bones.ellipsoid([cx,o.y+5,cz+3],[cx,o.y+6.2,cz-4],1.2,1.6,bone,0,1);
+    for(let i=0;i<10;i++)bones.ellipsoid([cx,o.y+5.6+Math.sin(i*.5)*.1,cz+4+i*1.1],[cx,o.y+5.3-i*.3,cz+5.1+i*1.1],.35-i*.025,.35-i*.025,bone,0,1.3);
+    for(let i=0;i<7;i++)bones.add(ToyKit.torus(1.3-i*.08,.08,6,16,Math.PI),bone,{p:[cx,o.y+5.4,cz-2+i*1],r:[0,Math.PI/2,Math.PI]});
+    bones.ellipsoid([cx,o.y+6.4,cz-4],[cx,o.y+8.4,cz-6.5],.45,.45,bone,0,1);
+    bones.add(ToyKit.roundedBox(1.4,1.6,3.2,.4),bone,{p:[cx,o.y+9,cz-8]});
+    for(let t=0;t<6;t++)bones.add(ToyKit.cone(.08,.3,5),'#f6f0e2',{p:[cx-.45+t*.18,o.y+8.2,cz-9.4],r:[Math.PI,0,0]});
+    for(const side of [-1,1]) {
+      bones.ellipsoid([cx+side*.8,o.y+5,cz],[cx+side*.9,o.y+2.6,cz+1.2],.4,.4,bone,0,1);bones.ellipsoid([cx+side*.9,o.y+2.6,cz+1.2],[cx+side*.9,o.y+.4,cz],.28,.28,bone,0,1);
+      bones.add(ToyKit.roundedBox(.6,.25,1.2,.1),bone,{p:[cx+side*.9,o.y+.2,cz-.4]});
+      bones.ellipsoid([cx+side*.6,o.y+6.2,cz-3.6],[cx+side*.8,o.y+5.6,cz-4.6],.12,.12,bone,0,1);
+    }
+    bones.add(ToyKit.roundedBox(5,.5,12,.1),'#5c544a',{p:[cx,o.y+.25,cz+2]});
+    const rex=bones.mesh();a.group.add(rex);grappleMeshes.push(rex);a.colliders.push(...[{x:cx,z:cz+2,w:5,d:12,bottom:o.y-.1,height:o.y+.5,walkable:true}]);playerBuildingColliders.push(a.colliders[a.colliders.length-1]);
+    // A blue whale hangs over the far end of the hall.
+    const whale=new ToyKit.Builder(),blue='#53718f';
+    whale.ellipsoid([o.x,o.y+17,o.z+14],[o.x,o.y+17.5,o.z+32],3.4,2.6,blue,0,1.05);
+    whale.add(ToyKit.cone(2.2,4,10),blue,{p:[o.x,o.y+17,o.z+11.6],r:[-Math.PI/2,0,0]});
+    whale.add(ToyKit.roundedBox(7,.3,2,.1),blue,{p:[o.x,o.y+17,o.z+9.6]});
+    for(const side of [-1,1])whale.add(ToyKit.roundedBox(3.6,.3,1.4,.1),blue,{p:[o.x+side*3.4,o.y+16,o.z+26],r:[0,side*.4,side*.3]});
+    whale.add(ToyKit.roundedBox(5.4,.6,14,.25),'#e6ddd0',{p:[o.x,o.y+15,o.z+24]});
+    for(const side of [-1,1])whale.rod([o.x+side*2,o.y+18.8,o.z+22],[o.x+side*2,o.y+26,o.z+22],.06,'#444');
+    const whaleMesh=whale.mesh();a.group.add(whaleMesh);grappleMeshes.push(whaleMesh);
+    const banner=new THREE.Mesh(new THREE.PlaneGeometry(14,2.4),displayMaterial('NATURAL HISTORY','Hall of Big Things','#7a5a2e'));banner.position.set(o.x,o.y+20,o.z-36.4);a.group.add(banner);
+    // The laser vault: a short corridor at the far wall guarding a golden fossil.
+    areaBox(a,1,6,16,marble,o.x-6.6,o.y+3,o.z+28,{});areaBox(a,10.4,1,16,trim,o.x-11.8,o.y+6.5,o.z+28,{collide:false});
+    const pedestal=areaBox(a,1.4,1.2,1.4,'#7a6a52',o.x-12,o.y+.6,o.z+31,{walkable:true});
+    const fossil=new THREE.Mesh(new THREE.IcosahedronGeometry(.45,1),new THREE.MeshStandardMaterial({color:0xffc83a,emissive:0xff9a1a,emissiveIntensity:.6,metalness:.6,roughness:.3}));
+    fossil.position.set(o.x-12,o.y+1.75,o.z+31);fossil.visible=!fossilTaken;a.group.add(fossil);a.fossil=fossil;
+    for(let i=0;i<5;i++) {
+      const beam=new THREE.Mesh(new THREE.BoxGeometry(10,.06,.06),new THREE.MeshBasicMaterial({color:0xff2a2a,toneMapped:false}));
+      beam.position.set(o.x-12,o.y+1,o.z+22.5+i*1.7);a.group.add(beam);lasers.push({beam,phase:i*1.3,speed:.9+i*.25,baseZ:o.z+22.5+i*1.7});
+    }
+    a.exits.push(o.clone().add(new THREE.Vector3(0,1,-34)));
+  }
+  let laserCooldown=0;
+  museumArea.update=dt=>{
+    const o=museumArea.origin;laserCooldown=Math.max(0,laserCooldown-dt);
+    for(const laser of lasers) {
+      // Beams sweep up and down; touching one trips the alarm.
+      const y=o.y+.4+(Math.sin(elapsed*laser.speed+laser.phase)*.5+.5)*2.6;laser.beam.position.y=y;
+      if(laserCooldown<=0 && Math.abs(position.z-laser.baseZ)<.35 && Math.abs(position.x-(o.x-12))<5 && position.y<y && position.y+1.8>y) {
+        laserCooldown=1.5;playEffect('alert');showBreaking('ALARM');addHeat(1);shell.classList.remove('hurt');void shell.offsetWidth;shell.classList.add('hurt');
+        fadeThen(()=>teleportPlayer(o.clone().add(new THREE.Vector3(-12,1,18)),0));
+      }
+    }
+    if(museumArea.fossil.visible){museumArea.fossil.rotation.y+=dt*1.5;}
+  };
+  interactables.push({label:'Take the golden fossil',get point(){return museumArea.fossil.position;},radius:2.2,enabled:()=>currentArea===museumArea && museumArea.fossil.visible,action:()=>{
+    museumArea.fossil.visible=false;try{localStorage.setItem('spida.fossil','1');}catch(_){/* Session only. */}
+    awardChaos(2500,'GOLDEN FOSSIL',museumArea.fossil.position.clone(),'hero');gainBucks(250);playEffect('success');burst(museumArea.fossil.position,60,confetti,{speed:10,up:6,life:1.4,size:.3});
+  }});
+  interactables.push({label:'Leave the museum',point:museumArea.exits[0],radius:3,enabled:()=>currentArea===museumArea,action:()=>leaveArea()});
+  {
+    // The entrance portico faces Central Park West.
+    const b=new ToyKit.Builder(),stone='#d8cfbd';
+    b.add(ToyKit.roundedBox(3.4,.4,12,.1),stone,{p:[0,.2,0]});
+    for(let i=-2;i<=2;i++)b.add(ToyKit.cylinder(.32,.36,7,14),stone,{p:[.6,3.9,i*2.6]});
+    b.add(ToyKit.roundedBox(2.6,1,12.6,.1),stone,{p:[.6,7.8,0]});
+    b.add(ToyKit.roundedBox(2.2,.5,1.6,.05),'#2b2620',{p:[-.6,1.5,0]});
+    const portico=new THREE.Group();portico.add(b.mesh());portico.position.set(-85.8,.45,-60);scene.add(portico);grappleMeshes.push(portico.children[0]);
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(10,1),displayMaterial('MUSEUM OF NATURAL HISTORY','','#7a5a2e'));sign.position.set(.62+.75,7.8,0);sign.rotation.y=Math.PI/2;portico.add(sign);
+    addEntrance('Enter the Museum of Natural History',new THREE.Vector3(-84.5,.45,-60),3.2,()=>enterArea(museumArea,museumArea.origin.clone().add(new THREE.Vector3(0,1,-32)),Math.PI,{exit:new THREE.Vector3(-82.5,.5,-60),facing:-Math.PI/2}),null,0);
+  }
+  // Bucks are earned by heroics and spent at the bodega.
+  const bucksHud=document.getElementById('bucks');
+  function gainBucks(amount){progress.bucks=Math.max(0,(progress.bucks||0)+amount);saveProgress();updateBucksHud();}
+  function updateBucksHud(){if(bucksHud)bucksHud.textContent=`$${(progress.bucks||0).toLocaleString()}`;}
+  // ---- Bodega: a corner store with a cashier, a cat and the shop ----
+  const bodegaArea=makeArea('BODEGA',new THREE.Vector3(690,600,-120),604.6);
+  {
+    const a=bodegaArea,o=a.origin;
+    areaBox(a,16,1,12,'#9b8f7e',o.x,o.y-.5,o.z,{walkable:true});
+    for(const side of [-1,1]){areaBox(a,1,5,12,'#d8d0bf',o.x+side*8,o.y+2.5,o.z,{});areaBox(a,16,5,1,'#d8d0bf',o.x,o.y+2.5,o.z+side*6,{});}
+    areaBox(a,16,.4,12,'#f1ece0',o.x,o.y+4.8,o.z,{collide:false});
+    // Shelves of brightly packed goods.
+    const goods=['#d94f4f','#e0b84a','#3fa7a0','#2f6fd9','#f2f0ea','#7a2f3f','#5c7d5a'];
+    for(const x of [-4,0]) {
+      areaBox(a,1,2.2,7,'#6b5a43',o.x+x,o.y+1.1,o.z+1,{});
+      const shelf=new ToyKit.Builder();
+      for(let row=0;row<3;row++)for(let i=0;i<12;i++)for(const side of [-1,1])shelf.add(ToyKit.roundedBox(.3,.42,.45,.05),goods[(row*5+i+x)%goods.length],{p:[o.x+x+side*.62,o.y+.5+row*.65,o.z-2+i*.55]});
+      a.group.add(shelf.mesh());
+    }
+    // A glowing drinks fridge along the back wall.
+    const fridge=new ToyKit.Builder();fridge.add(ToyKit.roundedBox(5,2.6,.9,.08),'#d9e2e8',{p:[o.x-2,o.y+1.3,o.z+5.2]});
+    for(let i=0;i<10;i++)for(let row=0;row<3;row++)fridge.add(ToyKit.cylinder(.09,.09,.32,8),goods[(i+row)%goods.length],{p:[o.x-4+i*.44,o.y+.6+row*.7,o.z+4.8]});
+    a.group.add(fridge.mesh(ToyKit.glowMaterial));
+    areaBox(a,1.2,1.1,4,'#7a5a3e',o.x+5,o.y+.55,o.z-2,{walkable:true});
+    const register=new ToyKit.Builder();register.add(ToyKit.roundedBox(.6,.4,.5,.06),'#2b2b2b',{p:[o.x+5,o.y+1.3,o.z-3.2]});register.add(ToyKit.roundedBox(.5,.28,.04,.02),'#7fdc9a',{p:[o.x+4.92,o.y+1.55,o.z-3.2],r:[0,0,-.3]});a.group.add(register.mesh());
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(6,1),displayMaterial('DELI • GROCERY','Open 24 hours','#c23a2e'));sign.position.set(o.x,o.y+3.6,o.z-5.45);a.group.add(sign);
+    a.exits.push(o.clone().add(new THREE.Vector3(0,1,-4.8)));
+  }
+  const cashier=makePedestrian(bodegaArea.origin.x+6.3,bodegaArea.origin.z-2,9911,0,0,'vendor');
+  cashier.settled=true;cashier.group.position.set(bodegaArea.origin.x+6.3,bodegaArea.origin.y,bodegaArea.origin.z-2);cashier.group.rotation.y=Math.PI/2;
+  // Cats: one lives in the bodega, more lounge around the city.
+  function makeCat(seed) {
+    const b=new ToyKit.Builder(),coat=['#e08a3c','#2b2b2b','#d8d0c4','#8a8478'][seed%4],dark='#3a2a20';
+    b.ellipsoid([0,.25,.18],[0,.27,-.2],.17,.16,coat,0,1.1);b.add(ToyKit.sphere(.15,12,10),coat,{p:[0,.42,-.3]});
+    for(const side of [-1,1]){b.add(ToyKit.cone(.06,.13,6),coat,{p:[side*.08,.57,-.3]});b.add(ToyKit.sphere(.025,6,4),'#c9e86a',{p:[side*.055,.45,-.43]});b.ellipsoid([side*.08,.2,.1],[side*.08,0,.1],.045,.045,coat,0,1);b.ellipsoid([side*.08,.2,-.15],[side*.08,0,-.15],.045,.045,coat,0,1);}
+    b.ellipsoid([0,.3,.32],[0,.55,.55],.04,.04,coat,0,1);b.add(ToyKit.sphere(.02,6,4),dark,{p:[0,.4,-.45]});
+    return b.mesh();
+  }
+  let catsPetted=new Set();try{catsPetted=new Set(JSON.parse(localStorage.getItem('spida.cats')||'[]'));}catch(_){/* None yet. */}
+  const cats=[];
+  {
+    const bodegaCat=makeCat(0);bodegaCat.position.set(bodegaArea.origin.x+5,bodegaArea.origin.y+1.1,bodegaArea.origin.z-1);bodegaCat.rotation.y=-Math.PI/2;bodegaArea.group.add(bodegaCat);cats.push(bodegaCat);
+    const candidates=buildings.filter(b=>!b.landmark && b.height>6 && b.height<60 && b.x<760).sort((m,n)=>random(m.x*1.7+n.z)-random(n.x*1.7+m.z));
+    const down=new THREE.Vector3(0,-1,0);
+    for(const b of candidates) {
+      if(cats.length>=11)break;
+      if(cats.some(c=>Math.hypot(c.position.x-b.x,c.position.z-b.z)<120))continue;
+      raycaster.set(new THREE.Vector3(b.x+b.w*.3,400,b.z),down);raycaster.far=420;const hit=raycaster.intersectObjects(grappleMeshes,false)[0];
+      if(!hit)continue;const cat=makeCat(cats.length);cat.position.copy(hit.point);cat.rotation.y=random(b.x)*6;cat.userData.skyline=true;scene.add(cat);cats.push(cat);
+    }
+    raycaster.far=150;
+  }
+  cats.forEach((cat,i)=>interactables.push({label:'Pet the cat',get point(){return cat.getWorldPosition(new THREE.Vector3());},radius:2.4,enabled:()=>!catsPetted.has(i),action:()=>{
+    catsPetted.add(i);try{localStorage.setItem('spida.cats',JSON.stringify([...catsPetted]));}catch(_){/* Session only. */}
+    gainBucks(40);awardChaos(300,`CAT ${catsPetted.size}/${cats.length}`,null,'hero');playEffect('success');updateActivityHud();
+  }}));
+  // The shop: the cashier sells upgrades and early suits for cash.
+  const shopItems=[
+    {id:'hotdog',name:'Hot dog',note:'Heals you fully',price:15,consumable:true},
+    {id:'sneakers',name:'Running sneakers',note:'Sprint faster',price:150},
+    {id:'gloves',name:'Weighted gloves',note:'Slaps hit harder',price:180},
+    {id:'fluid',name:'Premium web fluid',note:'Web zips recharge faster',price:200},
+    {id:'lawyer',name:'Lawyer on retainer',note:'Police heat fades twice as fast',price:220},
+    {id:'lining',name:'Armored lining',note:'Take a quarter less damage',price:260},
+    ...['symbiote','iron','pajamas','noir','gold'].map(key=>({id:`suit:${key}`,name:`${suits[key].name} suit`,note:'Unlock now',price:300}))
+  ];
+  const owns=id=>(progress.owned||[]).includes(id);
+  const shopMenu=document.getElementById('shop'),shopList=document.getElementById('shop-list'),shopCash=document.getElementById('shop-cash');
+  function renderShop() {
+    shopCash.textContent=`You have $${(progress.bucks||0).toLocaleString()}`;shopList.innerHTML='';
+    shopItems.forEach((item,i)=>{
+      const owned=!item.consumable && (owns(item.id)||has(item.id)),button=document.createElement('button');button.type='button';
+      button.innerHTML=`<b>${i+1}. ${item.name}</b><span>${item.note}</span><em>${owned?'Owned':`$${item.price}`}</em>`;
+      button.disabled=owned || (progress.bucks||0)<item.price;
+      button.addEventListener('click',()=>{
+        if(button.disabled)return;progress.bucks-=item.price;
+        if(item.consumable){playerHp=100;updateHeroHud();}else{progress.owned=[...(progress.owned||[]),item.id];if(item.id.startsWith('suit:'))updateSuitButtons();}
+        saveProgress();updateBucksHud();playEffect('success');renderShop();
+      });
+      shopList.appendChild(button);
+    });
+  }
+  function openShop(){if(!shopMenu)return;uiOpen=true;shopMenu.hidden=false;renderShop();if(document.pointerLockElement===canvas)document.exitPointerLock();}
+  function closeShop(){if(!shopMenu)return;uiOpen=false;shopMenu.hidden=true;if(!touchDevice && canvas.requestPointerLock){const request=canvas.requestPointerLock();if(request?.catch)request.catch(()=>{});}}
+  document.getElementById('shop-close')?.addEventListener('click',closeShop);
+  interactables.push({label:'Shop',point:bodegaArea.origin.clone().add(new THREE.Vector3(4,1,-2)),radius:2.4,enabled:()=>currentArea===bodegaArea,action:openShop});
+  interactables.push({label:'Leave the bodega',point:bodegaArea.exits[0],radius:2.2,enabled:()=>currentArea===bodegaArea,action:()=>leaveArea()});
+  // Pizza deliveries start from the bodega counter.
+  const deliveryBeacon=new THREE.Mesh(beaconGeometry,new THREE.MeshBasicMaterial({color:0x5ee0ff,transparent:true,opacity:.22,depthWrite:false,blending:THREE.AdditiveBlending,fog:false}));
+  deliveryBeacon.visible=false;deliveryBeacon.userData.projectile=true;deliveryBeacon.raycast=()=>{};scene.add(deliveryBeacon);
+  let delivery=null;
+  interactables.push({label:'Take a pizza delivery',point:bodegaArea.origin.clone().add(new THREE.Vector3(4,1,1.2)),radius:2,enabled:()=>currentArea===bodegaArea && !delivery,action:()=>{
+    const target=pizzaSpots[Math.floor(Math.random()*pizzaSpots.length)].clone();
+    delivery={target,time:0,limit:Math.max(45,Math.min(110,target.distanceTo(bodegaArea.returnPoint||position)/9+30)),damageTaken:0,hp:playerHp};
+    deliveryBeacon.position.set(target.x,150,target.z);deliveryBeacon.visible=true;showBreaking('DELIVER THE PIZZA BEFORE IT GETS COLD');leaveArea();
+  }});
+  function updateDelivery(dt) {
+    if(!delivery)return;
+    delivery.time+=dt;const left=delivery.limit-delivery.time;
+    if(playerHp<delivery.hp-30){finishDelivery(false,'THE PIZZA GOT SQUASHED');return;}
+    if(left<=0){finishDelivery(false,'THE PIZZA WENT COLD');return;}
+    if(raceHud && !race){raceHud.hidden=false;raceHud.textContent=`PIZZA DELIVERY  ${left.toFixed(1)}s  •  ${Math.round(delivery.target.distanceTo(position))} m`;}
+    if(delivery.target.distanceTo(position.clone().setY(position.y+1))<4)finishDelivery(true);
+  }
+  function finishDelivery(success,message) {
+    const tip=success?Math.round(40+Math.max(0,delivery.limit-delivery.time)*2):0;delivery=null;deliveryBeacon.visible=false;if(raceHud && !race)raceHud.hidden=true;
+    if(success){gainBucks(tip);awardChaos(600,`DELIVERED (+$${tip})`,null,'hero');playEffect('success');}else showBreaking(message);
+  }
+  // Storefronts with awnings mark the way into a bodega.
+  for(const [x,z] of [[126.4,389],[-153.6,-411],[526.4,649],[-33.6,609]]) {
+    const b=new ToyKit.Builder();
+    b.add(ToyKit.roundedBox(1,3.4,5,.05),'#3a2b1d',{p:[0,1.7,0]});b.add(ToyKit.roundedBox(1.8,.2,5.4,.05),'#c23a2e',{p:[.7,3.3,0]});
+    for(let i=-2;i<=2;i++)b.add(ToyKit.roundedBox(1.84,.06,.5,.02),'#f2f0ea',{p:[.7,3.42,i*1.05]});
+    b.add(ToyKit.roundedBox(.08,2.2,1.4,.04),'#1b1d20',{p:[.52,1.2,-1.4]});
+    for(let i=0;i<3;i++)b.add(ToyKit.roundedBox(.6,.35,.8,.05),['#e0b84a','#d94f4f','#5c7d5a'][i],{p:[.9,.3,.4+i*.85]});
+    const front=new THREE.Group();front.add(b.mesh());front.position.set(x,.45,z);scene.add(front);
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(4.6,.7),displayMaterial('DELI • GROCERY','','#c23a2e'));sign.position.set(.53,2.7,0);sign.rotation.y=Math.PI/2;front.add(sign);
+    addEntrance('Enter the bodega',new THREE.Vector3(x+1.5,.45,z-1.4),2.6,()=>enterArea(bodegaArea,bodegaArea.origin.clone().add(new THREE.Vector3(0,1,-3.6)),Math.PI,{exit:new THREE.Vector3(x+3,.5,z),facing:-Math.PI/2}),null,0);
+  }
+  // The Daily Bugle pays once for a photo of each landmark or villain.
+  let photosSold=new Set();try{photosSold=new Set(JSON.parse(localStorage.getItem('spida.photos')||'[]'));}catch(_){/* None sold. */}
+  const photoSubjects=[['Empire State Building',new THREE.Vector3(60,180,300)],['Chrysler Building',new THREE.Vector3(140,130,260)],['Flatiron Building',new THREE.Vector3(20,30,460)],['Statue of Liberty',new THREE.Vector3(-150,60,1215)],['Brooklyn Bridge',new THREE.Vector3(314,30,760)],['Wonder Wheel',new THREE.Vector3(560,27,1084)],['Times Square',new THREE.Vector3(60,25,220)]];
+  function sellPhoto() {
+    const sold=[];
+    const subjects=[...photoSubjects,...bosses.filter(b=>b.status==='active').map(b=>[b.name,b.actor.group.position.clone().setY(b.actor.group.position.y+2)]),...(balloon.active?[['Parade balloon',balloon.group.position.clone()]]:[])];
+    for(const [name,point] of subjects) {
+      if(photosSold.has(name) || point.distanceTo(camera.position)>320)continue;
+      const projected=point.clone().project(camera);
+      if(projected.z<1 && Math.abs(projected.x)<.75 && Math.abs(projected.y)<.75){photosSold.add(name);sold.push(name);}
+    }
+    if(!sold.length)return;
+    try{localStorage.setItem('spida.photos',JSON.stringify([...photosSold]));}catch(_){/* Session only. */}
+    gainBucks(sold.length*75);setTimeout(()=>showBreaking(`DAILY BUGLE BUYS YOUR PHOTO: ${sold.join(', ').toUpperCase()} (+$${sold.length*75})`),200);
+  }
+
+  updateBucksHud();
+  function updateAreas(dt) {
+    updateTrain(dt);updateDelivery(dt);
+    if(currentArea)currentArea.update?.(dt);
+    updateInteractPrompt();
+  }
   // Distance LOD: city chunks beyond the detail radius move to a hidden layer and
   // their towers are drawn by a few instanced stand-ins, cutting draw calls sharply.
   const lodHiddenLayer=3,lodNear=250,lodCell=120,lodChunks=new Map(),lodProxies=[];
@@ -6869,7 +7251,7 @@
     bosses:bosses.filter(b=>b.status==='active').map(b=>({name:b.name,hp:+b.hp.toFixed(1),x:+b.actor.group.position.x.toFixed(1),z:+b.actor.group.position.z.toFixed(1)}))
   });
   // Opt-in test hook for automated playtesting: open the game with ?debug.
-  if(new URLSearchParams(location.search).has("debug"))window.__spida={setTime:hour=>{dayHour=hour;},setWeather:next=>{setWeather(next);weather=next;precipitation=next==='clear'?0:1;overcast=next==='clear'?0:.85;},renderer,scene,camera,hero,grappleMeshes,buildings,playerBuildingColliders,position,velocity,keys,pedestrians,cars,chargeProps,tethers,bosses,progress,mutators,raceCourses,pizzaSpots,bouncePads,pressureTanks,targetGalleries,beginWebAction,endWebAction,jump,dodge,spiderSlap,fireBomb,webZip,hitPlayer,activateBoss,launchNuke,setMutator,setCameraMode,startCityEvent,clearCityEvent,reset,
+  if(new URLSearchParams(location.search).has("debug"))window.__spida={trainState:()=>({z:train.z,state:train.state,surfing:train.surfing,onRoof:onTrainRoof(),area:currentArea?.name}),setTime:hour=>{dayHour=hour;},setWeather:next=>{setWeather(next);weather=next;precipitation=next==='clear'?0:1;overcast=next==='clear'?0:.85;},renderer,scene,camera,hero,grappleMeshes,buildings,playerBuildingColliders,position,velocity,keys,pedestrians,cars,chargeProps,tethers,bosses,progress,mutators,raceCourses,pizzaSpots,bouncePads,pressureTanks,targetGalleries,beginWebAction,endWebAction,jump,dodge,spiderSlap,fireBomb,webZip,hitPlayer,activateBoss,launchNuke,setMutator,setCameraMode,startCityEvent,clearCityEvent,reset,
     step:dt=>{if(!paused)update(dt);},updateViewCamera,poseWalkingArms,pedestrianHandPoint,fleeDanger,updateThug,updateKnockback,enemyProjectiles,detonateNuke,updateNuke,
     nukeState:()=>nuke?{phase:nuke.phase,time:nuke.time,radius:nuke.radius,target:nuke.target.clone(),playerHit:nuke.playerHit,playerHitAt:nuke.playerHitAt,blackout,waveOpacity:nuke.wave?.material.opacity??0,windOpacity:Number(blastWind.style.opacity)||0}:null,
     look:(y,p)=>{yaw=y;pitch=p;},teleport:(x,y,z)=>{position.set(x,y,z);velocity.set(0,0,0);onGround=false;},
