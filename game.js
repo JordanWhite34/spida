@@ -2957,7 +2957,7 @@
   }
   function activateBoss(boss,announce=true) {
     if(boss.status!=='dormant')return;
-    const a=boss.actor;boss.status='active';boss.hp=boss.maxHp;a.group.visible=true;a.group.position.copy(boss.home);a.group.rotation.set(0,0,0);
+    const a=boss.actor;boss.status='active';boss.hp=boss.maxHp;boss.henchmen=false;boss.special=undefined;a.group.visible=true;a.group.position.copy(boss.home);a.group.rotation.set(0,0,0);
     a.state=a===rhino?'roam':'idle';a.timer=1;a.stuck=false;a.webHits=0;a.enraged=false;releaseActorWeb(a);
     if(announce) {
       showBreaking(`${boss.name} ${pick(alertVerbs)} ${boss.district}`);
@@ -3011,7 +3011,43 @@
     nukeButton.classList.toggle('locked',!nukeUnlocked);
     nukeButton.title=nukeUnlocked?'Launch nuke':`Locked: beat every villain (${villainsBeaten.size}/${bosses.length}) or cause 250,000 chaos`;
   }
+  // Second-phase moves, used once a boss is enraged.
+  const strikeMarkers=[];
+  function bossSpecial(boss,actors) {
+    const a=boss.actor,p=a.group.position;
+    if(a===rhino) {
+      // A ground stomp with a wide shockwave.
+      boss.special=6;enemyBlast(p.clone().setY(.2),8,actors,false);impactFeedback(3);
+    } else if(a.kind==='electro') {
+      // Lightning strikes land where rings appear, a second later.
+      boss.special=4.5;
+      for(let i=0;i<3;i++) {
+        const point=position.clone().add(new THREE.Vector3((Math.random()-.5)*8,0,(Math.random()-.5)*8));point.y=Math.max(.2,position.y);
+        const ring=new THREE.Mesh(attackRingGeometry,electricFlashMaterial);ring.position.copy(point);ring.rotation.x=-Math.PI/2;ring.scale.setScalar(2.6);ring.userData.projectile=true;scene.add(ring);
+        strikeMarkers.push({ring,point,time:1.1+i*.25,actors});
+      }
+      playEffect('electric',p);
+    } else if(a.kind==='goblin') {
+      // A rain of pumpkin bombs around you.
+      boss.special=5;
+      for(let i=0;i<5;i++) {
+        const mesh=new THREE.Mesh(villainShotGeometry,goblinBombMaterial);mesh.scale.setScalar(.38);mesh.userData.projectile=true;
+        mesh.position.set(position.x+(Math.random()-.5)*14,position.y+26+i*2,position.z+(Math.random()-.5)*14);scene.add(mesh);
+        enemyProjectiles.push({mesh,velocity:new THREE.Vector3(0,-14,0),electric:false,life:4});
+      }
+    } else {
+      // Doc Ock slams all four arms down around him.
+      boss.special=5;enemyBlast(p.clone().setY(.2),10,actors,false);impactFeedback(3);
+    }
+  }
+  function updateStrikes(dt) {
+    for(let i=strikeMarkers.length-1;i>=0;i--) {
+      const strike=strikeMarkers[i];strike.time-=dt;strike.ring.scale.setScalar(2.6+Math.sin(elapsed*20)*.2);
+      if(strike.time<=0){strike.ring.removeFromParent();strikeMarkers.splice(i,1);enemyBlast(strike.point,2.6,strike.actors,true);burst(strike.point.clone().setY(strike.point.y+2),24,[0xb8f8ff,0xffffff],{speed:10,up:8,life:.4,size:.3});}
+    }
+  }
   function updateBosses(dt) {
+    updateStrikes(dt);
     if(nuke)return;
     const actors=[...cars,...pedestrians.filter(n=>!n.dead)];let nearest=null,nearestDistance=70;
     for(const boss of bosses) {
@@ -3046,6 +3082,14 @@
             if(car.knockback){car.knockback.fromPlayer=false;car.knockback.bossThrow=true;worldPopup('INCOMING CAR!',p.clone().setY(p.y+4),'burst oops',1.4);playEffect('enemy',p);}
           }
         }
+      }
+      if(a.enraged && !boss.henchmen && distance<80 && !crime) {
+        // Enraged bosses call in henchmen.
+        boss.henchmen=true;startCrime(p,true,{name:`${boss.name}'S HENCHMEN`,members:['thug','gunner','brute']});
+      }
+      if(a.enraged && distance<45 && a.state!=='subdued') {
+        boss.special=(boss.special??3)-dt;
+        if(boss.special<=0)bossSpecial(boss,actors);
       }
       // Left alone, a villain wrecks its neighborhood.
       boss.rampage-=dt;
@@ -3184,14 +3228,14 @@
     if(z>942)return 'BATTERY PARK';
     return {harlem:'HARLEM',uptown:x<-30?'THE UPPER WEST SIDE':'THE UPPER EAST SIDE',midtown:'MIDTOWN',village:'THE VILLAGE',fidi:'THE FINANCIAL DISTRICT'}[districtAt(x,z)];
   }
-  function startCrime(near=position,close=false) {
+  function startCrime(near=position,close=false,forcedType=null) {
     if(crime || nuke)return false;
     for(let tries=0;tries<25;tries++) {
       const angle=Math.random()*Math.PI*2,d=close?35+Math.random()*30:60+Math.random()*80;
       const x=Math.round((near.x+Math.cos(angle)*d)/40)*40+6.4,z=Math.round((near.z+Math.sin(angle)*d)/40)*40+12;
       if(x<worldMinX+10||x>worldMaxX-10||z<worldMinZ+10||z>worldMaxZ-10||waterAt(x,z)||inPark(x,z))continue;
       if((buildingCells.get(`${Math.floor(x/40)},${Math.floor(z/40)}`)||[]).some(b=>insideBuilding(x,z,b,1.5)))continue;
-      const type=pick(crimeTypes),members=[];
+      const type=forcedType||pick(crimeTypes),members=[];
       for(const style of type.members){const thug=thugs.find(t=>t.thug===style && !members.includes(t))||thugs.find(t=>!members.includes(t));if(thug)members.push(thug);}
       members.forEach((thug,i)=>{
         if(thug.webPinned)clearWebPin(thug);releaseActorWeb(thug);
@@ -3342,6 +3386,7 @@
     for(const shot of enemyProjectiles)if(shot.mesh.position.distanceToSquared(position)<14*14 && shot.velocity.dot(position.clone().sub(shot.mesh.position))>0)senseTimer=Math.max(senseTimer,.3);
     shell.classList.toggle('sense',senseTimer>0);
     if(onGround){airJumps=0;if(pounding)poundImpact();}
+    if(surfCar && onGround){surfTime+=dt;if(surfTime>=2){surfTime-=2;awardChaos(100,'CAR SURFING',null,'trick');}}else surfTime=0;
     updateCrime(dt);updateStory();updateDistrict(dt);
   }
   // ---- Police and heat: hurting the city brings the cops; staying away loses them ----
@@ -3998,6 +4043,11 @@
     // Jumping away from a telegraphed punch is a perfect dodge.
     const dodged=thugs.filter(t=>t.windup>0 && t.group.position.distanceTo(position)<3);
     if(dodged.length){for(const t of dodged){t.windup=0;t.cooldown=1.6;}dodgeSlow=.55;dodgeBoost=3;awardChaos(300,'PERFECT DODGE',null,'trick');}
+    if(!onGround && !rope && (zipTime>0 || elapsed-zipEndedAt<.35)) {
+      // Jumping as a zip lands turns its momentum into a high launch.
+      const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));zipTime=0;zipEndedAt=-9;showWeb(false);
+      velocity.y=Math.max(velocity.y,0)+15;velocity.addScaledVector(forward,10);playEffect('zip');awardChaos(150,'POINT LAUNCH',null,'trick');return;
+    }
     if (rope) { playEffect('jump'); swing(false); velocity.y=Math.max(velocity.y,7); onGround=false; }
     else if (onGround || coyoteTime>0) { playEffect('jump'); velocity.y=11; onGround=false;coyoteTime=0;jumpBuffer=0; }
     else if(wallContact) {
@@ -4670,13 +4720,13 @@
       if(!overlaps(oldX,oldZ,actor.hx,actor.hz,other)) return true;
     }
     const base=actorFloor(actor);
-    if(position.y<base+actor.top && position.y+1.8>base) {
+    if(!cars.includes(actor) && position.y<base+actor.top && position.y+1.8>base) {
       const player={group:{position},hx:.38,hz:.38};
       if(overlaps(p.x,p.z,actor.hx,actor.hz,player) && !overlaps(oldX,oldZ,actor.hx,actor.hz,player)) return true;
     }
     return false;
   }
-  let playerNearActors=[];
+  let playerNearActors=[],surfCar=null,surfTime=0,carHitCooldown=0,wallRunning=false,zipEndedAt=-9;
   function gatherPlayerNearActors() {
     playerNearActors=[];
     for(const list of [cars,pedestrians])for(const actor of list) {
@@ -4696,7 +4746,7 @@
         velocity.y=13;onGround=false;playVoice(p,'grunt');playEffect('impact',p);impactFeedback(2.5);
         burst(p.clone().setY(top),18,[0xfff2a8,0xffffff],{speed:8,up:2,life:.4,size:.3});awardChaos(300,'GOOMBA STOMP',p.clone().setY(top+1));say(actor,'hit',.6);continue;
       }
-      if(previous.y>=top && velocity.y<=0) {position.y=top;velocity.y=0;onGround=true;continue;}
+      if(previous.y>=top && velocity.y<=0) {position.y=top;velocity.y=0;onGround=true;if(cars.includes(actor))surfCar=actor;continue;}
       const fast=person?horizontal>7.5 || (!onGround && velocity.length()>10):cars.includes(actor) && horizontal>28;
       if(fast && !actor.knockback && !actor.webHeld && !actor.webPinned) {
         // Goat rules: anything you run into at speed goes flying.
@@ -4856,8 +4906,7 @@
       const slow=!cars.includes(other) || other.stuck || other.waiting || other.currentSpeed<car.speed*.8;
       if(slow)nearest=Math.min(nearest,Math.max(0,gap));
     }
-    const playerGap=p.z-position.z-car.hz-.38;
-    if(position.y<car.top && playerGap>=-.2 && playerGap<14 && Math.abs(p.x-position.x)<car.hx+.63)nearest=Math.min(nearest,Math.max(0,playerGap));
+    // Drivers never brake for a masked man in the road.
     return nearest;
   }
   function updateCurvedTraffic(car,actors,dt) {
@@ -5671,7 +5720,7 @@
       if(updateWebPin(prop,dt) || updateKnockback(prop,dt))continue;
       if(prop.stuck){prop.webRemaining=Math.max(0,prop.webRemaining-dt);if(prop.webRemaining===0)releaseActorWeb(prop);}
     }
-    let grid=actorGrid(actors);
+    let grid=actorGrid(actors);carHitCooldown=Math.max(0,carHitCooldown-dt);
     for(const car of cars) {
       if(nuke?.hitActors.has(car) || car.webTether)continue;
       const p=car.group.position,oldCell=cellKey(Math.floor(p.x/40),Math.floor(p.z/40));
@@ -5679,12 +5728,22 @@
         const responding=threats.some(t=>Math.hypot(t.x-p.x,t.z-p.z)<95);
         car.speed=car.normalSpeed*(responding?1.35:1);car.beacon.visible=responding && Math.floor(elapsed*5)%2===0;
       }
+      const carStartX=p.x,carStartZ=p.z;
       if(!car.webHeld && !updateWebPin(car,dt) && !updateKnockback(car,dt)) {
         if(rescue?.type==='runaway' && rescue.actor===car && rescue.result==='active' && !car.stuck)updateRunaway(car,nearbyActors(grid,car),dt);
         else updateTraffic(car,nearbyActors(grid,car),dt);
         const wet=waterAt(p.x,p.z);
         if(wet && p.y<wet.surface+.7){p.y+=(wet.floor-p.y)*(1-Math.exp(-5*dt));car.currentSpeed*=Math.exp(-2*dt);car.wading=true;}
         else if(car.wading && !wet){p.y+=(0-p.y)*(1-Math.exp(-8*dt));if(p.y>-.02){p.y=0;car.wading=false;}}
+      }
+      // Riding on a roof carries you along; standing in the road gets you hit.
+      if(surfCar===car && onGround){position.x+=p.x-carStartX;position.z+=p.z-carStartZ;}
+      if(!car.knockback && car.currentSpeed>3 && carHitCooldown<=0 && surfCar!==car) {
+        const dx=position.x-p.x,dz=position.z-p.z;
+        if(Math.abs(dx)<car.hx+.45 && Math.abs(dz)<car.hz+.45 && position.y<p.y+car.top-.3 && position.y>p.y-1) {
+          const forward=new THREE.Vector3(-Math.sin(car.group.rotation.y),0,-Math.cos(car.group.rotation.y));
+          hitPlayer(forward,Math.max(10,car.currentSpeed*1.6),7,false,Math.round(6+car.currentSpeed*1.4));carHitCooldown=1.2;playEffect('impact',p);
+        }
       }
       const newCell=cellKey(Math.floor(p.x/40),Math.floor(p.z/40));
       if(oldCell!==newCell) {
@@ -5823,7 +5882,7 @@
     wallCooldown=Math.max(0,wallCooldown-dt);wallContact=null;
     dodgeCooldown=Math.max(0,dodgeCooldown-dt);
     zipCooldown=Math.max(0,zipCooldown-dt);
-    if(zipTime>0){zipTime=Math.max(0,zipTime-dt);if(zipTime===0 && !rope && !webGrab)showWeb(false);}
+    if(zipTime>0){zipTime=Math.max(0,zipTime-dt);if(zipTime===0){zipEndedAt=elapsed;if(!rope && !webGrab)showWeb(false);}}
     let anchorStart=null,anchorEnd=null;
     if(rope) {
       anchorStart=rope.anchor.clone();anchorEnd=anchorStart.clone();
@@ -5841,6 +5900,7 @@
     if(input.lengthSq())input.normalize();
     // Solve the swing in small steps so arcs and reeling stay stable at different frame rates.
     const steps=Math.max(1,Math.ceil(dt/(1/120))),step=dt/steps;gatherPlayerNearActors();
+    surfCar=null;wallRunning=false;
     for(let i=0;i<steps;i++) {
       previous.copy(position);
       if(nuke?.phase==='blast' && nuke.playerHit) {
@@ -5959,6 +6019,14 @@
               }
             }
           }
+          else if(!onGround && !rope && !wallCooldown && wallRunTime<1.8 && b.height>8 && !b.shape && !insideBuilding(previous.x,previous.z,b,.4)) {
+            // Running fast along a facade keeps you on the wall for a moment.
+            const hitX=Math.abs(previous.x-b.x)>=b.w/2+.4,parallel=hitX?Math.abs(velocity.z):Math.abs(velocity.x);
+            if(parallel>11) {
+              wallContact=new THREE.Vector3(hitX?Math.sign(previous.x-b.x):0,0,hitX?0:Math.sign(previous.z-b.z));
+              wallRunTime+=step;wallRunning=true;velocity.y=Math.max(velocity.y,-1.2);
+            }
+          }
           if(b.shape) {
             if(!insideBuilding(previous.x,previous.z,b,.4)){position.x=previous.x;position.z=previous.z;velocity.x=0;velocity.z=0;}
             continue;
@@ -6010,7 +6078,8 @@
     const bob=onGround?Math.sin(elapsed*(8+speed*.2))*Math.min(speed/18,1)*.045:0;
     const lateral=velocity.x*Math.cos(yaw)-velocity.z*Math.sin(yaw);
     const blastShake=nuke?.phase==='blast'&&nuke.playerHit?Math.max(0,1-(nuke.time-nuke.playerHitAt)/5):0;
-    const targetRoll=(onGround?-lateral*.0015:THREE.MathUtils.clamp(-lateral*.0035,-.095,.095)) + Math.sin(elapsed*14)*Math.min(playerImpact,1)*.24+Math.sin(elapsed*19)*blastShake*.07;
+    const wallTilt=wallRunning && wallContact?THREE.MathUtils.clamp(wallContact.x*Math.cos(yaw)-wallContact.z*Math.sin(yaw),-1,1)*-.16:0;
+    const targetRoll=(onGround?-lateral*.0015:THREE.MathUtils.clamp(-lateral*.0035,-.095,.095))+wallTilt + Math.sin(elapsed*14)*Math.min(playerImpact,1)*.24+Math.sin(elapsed*19)*blastShake*.07;
     cameraRoll+=(targetRoll*(settings.reduceMotion?.15:1)-cameraRoll)*(1-Math.exp(-4*dt));
     const targetFov=settings.fov+(settings.reduceMotion?0:Math.min(speed/38,1)*9+(rope?2:0))-(slowMotion?6:0);
     camera.fov+=(targetFov-camera.fov)*(1-Math.exp(-3*dt));camera.updateProjectionMatrix();
