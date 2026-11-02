@@ -7163,9 +7163,105 @@
 
   updateBucksHud();
   function updateAreas(dt) {
-    updateTrain(dt);updateDelivery(dt);
+    updateTrain(dt);updateDelivery(dt);updatePigeons(dt);
     if(currentArea)currentArea.update?.(dt);
     updateInteractPrompt();
+  }
+  // ---- Street and skyline detail, drawn as instanced batches ----
+  {
+    const transform=new THREE.Object3D(),color=new THREE.Color();
+    function batch(geometry,material,items) {
+      const mesh=new THREE.InstancedMesh(geometry,material,Math.max(1,items.length));mesh.count=items.length;
+      items.forEach((item,i)=>{transform.position.copy(item.p);transform.rotation.set(item.t||0,item.r||0,0,'YXZ');transform.scale.copy(item.s||new THREE.Vector3(1,1,1));transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);if(item.c!==undefined)mesh.setColorAt(i,color.set(item.c));});
+      mesh.castShadow=false;mesh.receiveShadow=true;mesh.userData.projectile=true;mesh.raycast=()=>{};mesh.computeBoundingSphere();scene.add(mesh);return mesh;
+    }
+    const awnings=[],acUnits=[],vents=[],antennas=[],tanks=[];
+    const awningColors=['#a3322b','#2f5c3a','#1f3a6b','#c48a2a','#5a2a52','#2b2b2b','#a35a2b'];
+    for(const b of buildings) {
+      if(b.landmark || b.shape || b.suburb || b.communityKind || b.destroyed || !b.w || b.height<8 || b.walkable)continue;
+      const seed=b.x*.37+b.z*.71;
+      const faces=[[1,0,b.d],[-1,0,b.d],[0,1,b.w],[0,-1,b.w]];
+      faces.forEach(([nx,nz,length],f)=>{
+        const fx=b.x+nx*(b.w/2),fz=b.z+nz*(b.d/2),along=new THREE.Vector3(nz,0,nx).normalize(),angle=Math.atan2(nx,nz);
+        // Storefront awnings along the ground floor.
+        if(random(seed+f)>.35 && !b.rowHouse) {
+          const count=Math.max(1,Math.floor(length/7)),c=awningColors[Math.floor(random(seed+f*3)*awningColors.length)];
+          for(let i=0;i<count;i++){const t=(i+.5)/count-.5;awnings.push({p:new THREE.Vector3(fx+nx*.85+along.x*t*length*.9,3.3,fz+nz*.85+along.z*t*length*.9),r:angle,t:.38,s:new THREE.Vector3(Math.min(4.5,length/count*.8),1,1),c});}
+        }
+        // Window air conditioners stick out at random floors.
+        const units=Math.min(9,Math.round(length*Math.min(b.height,45)/260));
+        for(let i=0;i<units;i++){const t=random(seed+i*7+f)-.5,y=6+random(seed+i*11+f*5)*(Math.min(b.height,45)-9);acUnits.push({p:new THREE.Vector3(fx+nx*.3+along.x*t*length*.85,y,fz+nz*.3+along.z*t*length*.85),r:angle,c:random(seed+i)>.5?'#d9d6cf':'#b9b5ad'});}
+      });
+      // Rooftop vents, antennas and the occasional wooden water tank.
+      const roof=b.height+.1;
+      for(let i=0;i<1+Math.floor(random(seed+40)*3);i++)vents.push({p:new THREE.Vector3(b.x+(random(seed+i*3)-.5)*b.w*.6,roof+.6,b.z+(random(seed+i*5)-.5)*b.d*.6),r:random(seed+i)*3,c:random(seed+i*9)>.5?'#8f9497':'#6f7477'});
+      if(random(seed+50)>.55)antennas.push({p:new THREE.Vector3(b.x+(random(seed+51)-.5)*b.w*.5,roof+3,b.z+(random(seed+52)-.5)*b.d*.5)});
+      if(!b.rowHouse && b.height<70 && random(seed+60)>.7)tanks.push({p:new THREE.Vector3(b.x+(random(seed+61)-.5)*b.w*.4,roof,b.z+(random(seed+62)-.5)*b.d*.4)});
+    }
+    const lit=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.8});
+    const awningGeometry=new THREE.BoxGeometry(1,.12,1.8);
+    batch(awningGeometry,lit,awnings);
+    batch(new THREE.BoxGeometry(.75,.48,.6),lit.clone(),acUnits);
+    batch(new THREE.BoxGeometry(2.2,1.2,1.6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.6,metalness:.3}),vents);
+    batch(new THREE.CylinderGeometry(.06,.1,6,6),new THREE.MeshStandardMaterial({color:0x55595c,metalness:.6,roughness:.4}),antennas);
+    const tankGeometry=new THREE.CylinderGeometry(1.5,1.5,2.8,12);tankGeometry.translate(0,3.6,0);
+    const tankRoofGeometry=new THREE.ConeGeometry(1.65,.9,12);tankRoofGeometry.translate(0,5.45,0);
+    const tankLegGeometry=new THREE.BoxGeometry(2,2.2,2);tankLegGeometry.translate(0,1.1,0);
+    batch(tankGeometry,new THREE.MeshStandardMaterial({color:0x7a5f45,roughness:.9}),tanks);batch(tankRoofGeometry,new THREE.MeshStandardMaterial({color:0x4d5459,roughness:.8}),tanks);
+    batch(tankLegGeometry,new THREE.MeshStandardMaterial({color:0x3a3e41,roughness:.7,wireframe:true}),tanks);
+    // Corner props: newspaper boxes, mailboxes and piles of trash bags.
+    const newsBoxes=[],mailboxes=[],bags=[];
+    const corners=[];
+    for(let i=-5;i<=5;i++)for(let j=-16;j<=22;j++)corners.push([i*40,j*40]);
+    for(let i=9;i<=19;i++)for(let j=11;j<=26;j++)corners.push([i*40,j*40]);
+    for(const [x,z] of corners) {
+      const seed=x*1.3+z*.7;
+      if(inPark(x+8,z+8)||waterAt(x+8,z+8))continue;
+      if(random(seed)>.5)for(let k=0;k<2+Math.floor(random(seed+1)*2);k++)newsBoxes.push({p:new THREE.Vector3(x+5.9,.95,z+9+k*.75),c:['#c23a2e','#1f4f9a','#e0b84a','#2f6b4f','#f2f0ea'][Math.floor(random(seed+k*3)*5)]});
+      if(random(seed+5)>.7)mailboxes.push({p:new THREE.Vector3(x+9,1.05,z+5.9),c:'#1f4f9a'});
+      if(random(seed+9)>.6)for(let k=0;k<2+Math.floor(random(seed+10)*4);k++)bags.push({p:new THREE.Vector3(x+5.9+random(seed+k)*.6,.75,z+20+random(seed+k*2)*2.5),s:new THREE.Vector3(.9,.8+random(seed+k*5)*.4,.9),c:k%3?'#16181a':'#2a2d30'});
+    }
+    batch(new THREE.BoxGeometry(.5,1.05,.55),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.5}),newsBoxes);
+    const mailGeometry=new THREE.CylinderGeometry(.32,.32,.6,12,1,false,0,Math.PI);mailGeometry.rotateZ(Math.PI/2);
+    batch(new THREE.BoxGeometry(.6,1.1,.6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.5}),mailboxes);
+    batch(new THREE.SphereGeometry(.42,10,8),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.25,metalness:.1}),bags);
+    // Rooftop billboards add color to the skyline.
+    const ads=[['NEW YORK','The city that never naps',['#c23a2e','#3a0b10']],['BAGELS','Since forever',['#e0a23a','#5a2e06']],['THE DAILY BUGLE','Pictures of Spider-Man wanted',['#20262c','#0b0d10']],['BROADWAY','Tonight only. Probably.',['#6b2bd1','#1b0b33']],['YELLOW CAB','Hail yes',['#e8c33a','#4a3a06']],['PIZZA','$1 a slice. Ask why.',['#2f8a3e','#0a2610']]];
+    const tall=buildings.filter(b=>!b.landmark && !b.shape && b.height>45 && b.height<120).sort((m,n)=>random(m.x+n.z)-random(n.x+m.z)).slice(0,14);
+    tall.forEach((b,i)=>{
+      const [title,line,colors]=ads[i%ads.length],board=new THREE.Group();board.position.set(b.x,b.height+.2,b.z);board.rotation.y=Math.floor(random(b.x)*4)*Math.PI/2;
+      const frame=new THREE.Mesh(new THREE.BoxGeometry(12.4,6.6,.4),new THREE.MeshStandardMaterial({color:0x2b2f33,metalness:.5,roughness:.5}));frame.position.y=5.6;board.add(frame);
+      for(const x of [-4.5,4.5]){const leg=new THREE.Mesh(new THREE.BoxGeometry(.3,2.4,.3),frame.material);leg.position.set(x,1.2,0);board.add(leg);}
+      const face=new THREE.Mesh(new THREE.PlaneGeometry(12,6.2),new THREE.MeshBasicMaterial({map:billboardCanvas([title,line,''],colors),toneMapped:false}));face.position.set(0,5.6,.21);board.add(face);
+      const back=face.clone();back.rotation.y=Math.PI;back.position.z=-.21;board.add(back);
+      board.userData.skyline=true;scene.add(board);grappleMeshes.push(frame);
+    });
+  }
+  // Pigeons gather in parks and plazas and scatter when you come close.
+  const pigeonSpots=[[-20,0],[-40,-120],[0,120],[60,220],[20,540],[20,930],[-60,-160],[560,1060],[-110,-60],[140,140]];
+  const pigeons=[];
+  pigeonSpots.forEach(([x,z],s)=>{for(let i=0;i<12;i++){const a=random(s*31+i)*Math.PI*2,r=1+random(s*17+i)*4;pigeons.push({home:new THREE.Vector3(x+Math.cos(a)*r,inPark(x,z)?.15:.5,z+Math.sin(a)*r),pos:new THREE.Vector3(),vel:new THREE.Vector3(),flying:0,phase:random(s+i*3)*6,yaw:random(i)*6});}});
+  const pigeonGeometry=(()=>{const b=new ToyKit.Builder();b.ellipsoid([0,.16,.08],[0,.18,-.12],.08,.07,'#7d8288',0,1.1);b.add(ToyKit.sphere(.055,8,6),'#5d6670',{p:[0,.26,-.14]});b.add(ToyKit.cone(.015,.05,4),'#c99a3c',{p:[0,.25,-.2],r:[-Math.PI/2,0,0]});return b.geometry();})();
+  const pigeonMesh=new THREE.InstancedMesh(pigeonGeometry,ToyKit.toyMaterial,pigeons.length);pigeonMesh.frustumCulled=false;pigeonMesh.userData.projectile=true;pigeonMesh.raycast=()=>{};scene.add(pigeonMesh);
+  pigeons.forEach(p=>p.pos.copy(p.home));
+  const pigeonTransform=new THREE.Object3D();
+  function updatePigeons(dt) {
+    for(let i=0;i<pigeons.length;i++) {
+      const p=pigeons[i];
+      if(p.flying>0) {
+        p.flying-=dt;p.vel.y+=dt*2;p.pos.addScaledVector(p.vel,dt);
+        if(p.flying<=0)p.pos.copy(p.home);
+      } else {
+        const dx=p.pos.x-position.x,dz=p.pos.z-position.z;
+        if(dx*dx+dz*dz<36 && Math.abs(p.pos.y-position.y)<3) {
+          // Scatter away from the player, then return home much later.
+          const away=Math.atan2(dx,dz)+(random(i+elapsed)-.5);p.vel.set(Math.sin(away)*7,6+random(i)*3,Math.cos(away)*7);p.flying=12;p.yaw=away+Math.PI;if(i%6===0)playEffect('bird',p.pos);
+        }
+      }
+      const peck=p.flying>0?0:Math.max(0,Math.sin(elapsed*3+p.phase))*.5;
+      pigeonTransform.position.copy(p.pos);pigeonTransform.rotation.set(p.flying>0?-.3:peck,p.yaw,0);pigeonTransform.updateMatrix();pigeonMesh.setMatrixAt(i,pigeonTransform.matrix);
+    }
+    pigeonMesh.instanceMatrix.needsUpdate=true;
   }
   // Distance LOD: city chunks beyond the detail radius move to a hidden layer and
   // their towers are drawn by a few instanced stand-ins, cutting draw calls sharply.
