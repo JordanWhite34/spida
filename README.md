@@ -55,6 +55,16 @@ Look for neighborhood markets, park gatherings, rooftop parties, scaffolding, di
 
 Story progress, levels, suits, the nuke unlock, pizza and race records are kept in the browser's local storage.
 
+## Development
+
+`game.js` is generated from the parts in `src/` (they are concatenated in file-name order inside one closure), so edit `src/` and rebuild:
+
+```sh
+npm run build
+```
+
+`npm run check` confirms `game.js` matches `src/` and parses. `npm test` serves the game, opens it in headless Chromium with the `?debug` hook and checks world building, swinging, combat, weather, the subway, the nuke lock and console errors (run `npx playwright install chromium` once first). GitHub Actions runs both on every push.
+
 ## Models
 
 The third-person hero uses an animated Quaternius superhero base with an in-game suit shader. The villains are generated in code by [toy-models.js](toy-models.js) from smooth primitives with vertex colors. The pedestrians use the original hand-built models in [game.js](game.js). [models.html](models.html) previews the generator, including an alternative set of people the game doesn't currently use.
