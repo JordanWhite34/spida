@@ -1,0 +1,14 @@
+{
+  "name": "skyline-swing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs --check && node --check game.js",
+    "serve": "python3 -m http.server 8000",
+    "test": "node tests/smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1"
+  }
+}
