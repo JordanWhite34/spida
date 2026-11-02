@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Skyline Swing</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <main class="game-shell">
@@ -26,6 +26,7 @@
     <div id="speed-blur" class="speed-blur" aria-hidden="true"><div></div><div></div></div>
     <div class="screen-shade" aria-hidden="true"></div>
     <canvas id="minimap" width="320" height="320" aria-label="City minimap showing your position, landmarks, and Rhino"></canvas>
+    <div id="clock" class="clock" aria-label="Time of day"></div>
     <div id="heat" class="heat" aria-label="Police heat" hidden></div>
     <canvas id="speed-lines" class="speed-lines" aria-hidden="true"></canvas>
     <div id="popups" class="popups" aria-hidden="true"></div>
@@ -118,7 +119,7 @@
   <script src="toy-models.js?v=6"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
-  <script src="game.js?v=21"></script>
+  <script src="game.js?v=22"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
   <script type="module" src="featured-model.js?v=2"></script>
 </body>

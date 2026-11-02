@@ -17,11 +17,12 @@
   scene.fog = new THREE.Fog(0xb6c9d0, 260, 1150);
   const sky = new THREE.Mesh(new THREE.SphereGeometry(1100, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { altitude: { value: 0 } },
+    uniforms: { altitude: { value: 0 }, uSun: { value: new THREE.Vector3(-.48,.8,.32) }, uNight: { value: 0 }, uDusk: { value: 0 }, uOvercast: { value: 0 }, uTime: { value: 0 } },
     vertexShader: 'varying vec3 vPosition; void main() { vPosition = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `
       varying vec3 vPosition;
-      uniform float altitude;
+      uniform float altitude,uNight,uDusk,uOvercast,uTime;
+      uniform vec3 uSun;
       float hash(vec2 p) { return fract(sin(dot(p,vec2  (127.1,311.7)))*43758.5453); }
       float noise(vec2 p) {
         vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
@@ -30,13 +31,23 @@
       void main() {
         vec3 dir=normalize(vPosition); float h=dir.y;
         vec3 col=mix(vec3(.78,.76,.72),vec3(.18,.39,.61),smoothstep(-.08,.78,h));
-        col=mix(col,vec3(.91,.76,.65),exp(-abs(h-.04)*11.0)*.24);
-        vec3 sun=normalize(vec3(-.48,.80,.32)); float d=max(dot(dir,sun),0.0);
-        col+=vec3(.32,.22,.13)*pow(d,12.0)+vec3(.65,.51,.34)*pow(d,700.0);
-        vec2 p=dir.xz/max(h+.22,.12)*1.6;
+        // Sunset warms the horizon and purples the upper sky.
+        col=mix(col,mix(vec3(1.0,.55,.3),vec3(.33,.27,.5),smoothstep(-.05,.55,h)),uDusk*.75);
+        col=mix(col,vec3(.91,.76,.65),exp(-abs(h-.04)*11.0)*.24*(1.0-uNight));
+        vec3 sun=normalize(uSun); float d=max(dot(dir,sun),0.0);
+        col+=(vec3(.32,.22,.13)*pow(d,12.0)+vec3(.65,.51,.34)*pow(d,700.0))*(1.0-uNight)*(1.0-uOvercast*.8);
+        // Night: deep blue with a city glow along the horizon, a moon and stars.
+        vec3 night=mix(vec3(.02,.03,.06),vec3(.05,.08,.16),smoothstep(-.1,.6,h))+vec3(.09,.06,.03)*exp(-abs(h)*9.0);
+        col=mix(col,night,uNight);
+        float m=max(dot(dir,-sun),0.0);col+=(vec3(.85,.88,.95)*pow(m,2500.0)*2.0+vec3(.08,.1,.16)*pow(m,24.0))*uNight*(1.0-uOvercast);
+        vec2 sp=dir.xz/max(h+.05,.05)*240.0;float star=step(.9978,hash(floor(sp)))*smoothstep(.04,.3,h);
+        col+=vec3(star)*uNight*(1.0-uOvercast)*(.55+.45*sin(uTime*3.0+sp.x));
+        vec2 p=dir.xz/max(h+.22,.12)*1.6+vec2(uTime*.004,0.0);
         float cloud=noise(p)*.53+noise(p*2.07)*.27+noise(p*4.13)*.13+noise(p*8.2)*.06;
-        float mask=smoothstep(.50,.72,cloud)*smoothstep(.015,.17,h)*(1.0-smoothstep(.75,.98,h));
-        col=mix(col,vec3(.94,.92,.87),mask*.48);
+        float mask=smoothstep(.50-.32*uOvercast,.72,cloud)*smoothstep(.015,.17,h)*(1.0-smoothstep(.75,.98,h));
+        vec3 cloudColor=mix(mix(vec3(.94,.92,.87),vec3(.98,.68,.52),uDusk*.6),vec3(.42,.44,.48),uOvercast)*mix(1.0,.1,uNight);
+        col=mix(col,cloudColor,mask*(.48+.4*uOvercast));
+        col=mix(col,vec3(.56,.59,.62)*mix(1.0,.1,uNight),uOvercast*.5);
         col=mix(col,col*vec3(.15,.22,.42),smoothstep(250.0,750.0,altitude));
         gl_FragColor=vec4(col,1.0);
       }`
@@ -54,7 +65,7 @@
   const skyReflection=new THREE.CanvasTexture(reflectionCanvas);skyReflection.colorSpace=THREE.SRGBColorSpace;skyReflection.mapping=THREE.EquirectangularReflectionMapping;
   const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, .3, 1300);
   camera.rotation.order='YXZ';
-  scene.add(new THREE.HemisphereLight(0xd9edff, 0x81796d, 1.38));
+  const hemi=new THREE.HemisphereLight(0xd9edff, 0x81796d, 1.38);scene.add(hemi);
   const fill=new THREE.DirectionalLight(0xaac8dd,.55);fill.position.set(80,55,-90);scene.add(fill);
   const sun = new THREE.DirectionalLight(0xffe3c4, 3.15); sun.position.set(-60, 100, 40); sun.castShadow=true;
   sun.shadow.mapSize.set(2048,2048); Object.assign(sun.shadow.camera,{left:-85,right:85,top:85,bottom:-85,near:1,far:300});
@@ -149,7 +160,7 @@
   const buildings = [], upperBuildingColliders = [], grappleMeshes = [], destructibleBuildings=[];
   const worldMinX=-258,worldMaxX=762,worldMinZ=-698,worldMaxZ=1275;
   // Repeating facade tiles retain a consistent window size across short and tall buildings.
-  const facadeMaps=new Map();
+  const facadeMaps=new Map(),facadeNightMaps=new Map(),nightFacades=[];
   function facadeMaterial(kind, tint) {
     const glassStyle=kind===2||kind===4;
     let texture=facadeMaps.get(kind);
@@ -198,7 +209,22 @@
     texture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
     facadeMaps.set(kind,texture);
     }
-    return new THREE.MeshStandardMaterial({color:tint,map:texture,roughness:glassStyle?.30:.86,metalness:glassStyle?.24:.02,envMap:glassStyle?skyReflection:null,envMapIntensity:.58});
+    // A matching map of lit windows glows after dark.
+    let night=facadeNightMaps.get(kind);
+    if(!night) {
+      const image=document.createElement('canvas');image.width=256;image.height=512;const c=image.getContext('2d');
+      c.fillStyle='#000';c.fillRect(0,0,256,512);
+      const cols=glassStyle?8:6,rows=16,dx=256/cols,dy=512/rows;
+      for(let row=0;row<rows;row++)for(let col=0;col<cols;col++) {
+        const lit=random(row*41+col*7+kind*13+5);if(lit<.66)continue;
+        const x=col*dx+(glassStyle?3:6),y=row*dy+(glassStyle?3:5),w=dx-(glassStyle?6:12),h=dy-(glassStyle?6:10);
+        c.fillStyle=lit>.93?'#a9d4ff':lit>.8?'#ffe0a8':'#ffc978';c.fillRect(x,y,w,h);
+        if(lit<.7){c.fillStyle='rgba(0,0,0,.55)';c.fillRect(x,y,w,h*.45);}
+      }
+      night=new THREE.CanvasTexture(image);night.colorSpace=THREE.SRGBColorSpace;night.wrapS=night.wrapT=THREE.RepeatWrapping;facadeNightMaps.set(kind,night);
+    }
+    const facade=new THREE.MeshStandardMaterial({color:tint,map:texture,roughness:glassStyle?.30:.86,metalness:glassStyle?.24:.02,envMap:glassStyle?skyReflection:null,envMapIntensity:.58,emissive:0xffffff,emissiveMap:night,emissiveIntensity:0});
+    nightFacades.push(facade);return facade;
   }
   function facadeBox(w,h,d,mat,x,y,z) {
     const mesh=box(w,h,d,mat,x,y,z), geometry=mesh.geometry;
@@ -3312,7 +3338,7 @@
     if(Math.random()<dt*.15)worldPopup(pick(['Get him!','It\'s the bug!','You want some?!','Mind your business, pajamas','I got a permit for this!']),p.clone().setY(p.y+2.4),'speech',1.8,npc);
   }
   function updateCrime(dt) {
-    if(!crime){crimeTimer-=dt;if(crimeTimer<=0){if(!startCrime())crimeTimer=8;}return;}
+    if(!crime){crimeTimer-=dt*(1+nightAmount);if(crimeTimer<=0){if(!startCrime())crimeTimer=8;}return;}
     crime.time+=dt;crimeBeacon.material.opacity=.15+.08*Math.sin(elapsed*5);
     crimeBeacon.visible=Math.hypot(position.x-crime.x,position.z-crime.z)>40;
     for(const thug of crime.members)if(thug.dead && !thug.defeated)defeatThug(thug,'PERMANENTLY RETIRED');
@@ -4664,6 +4690,7 @@
     return wrap;
   }
   function splatter(hit) {
+    if(hit.object.userData.balloon){hitBalloon();return;}
     let targetNode=hit.object;while(targetNode && !targetNode.userData.galleryTarget)targetNode=targetNode.parent;
     if(targetNode?.userData.galleryTarget){hitGalleryTarget(targetNode.userData.galleryTarget);return;}
     const structure=structureForHit(hit);
@@ -5842,7 +5869,7 @@
         if(Math.random()<dt*.35 && Math.hypot(p.x-position.x,p.z-position.z)<5 && Math.abs(p.y-position.y)<2 && Math.hypot(velocity.x,velocity.z)<6)say(npc,'greet');
       }
     }
-    updateCityCart(cityEvent,grid,dt);updatePadActors(grid);updateTethers(dt);updateDogs(dt);updateLandmarks(dt);
+    updateCityCart(cityEvent,grid,dt);updatePadActors(grid);updateTethers(dt);updateDogs(dt);updateLandmarks(dt);updateEvents(dt);
     for(const bird of birds) {
       const t=elapsed*.28+bird.phase;
       bird.group.position.set(-30+Math.sin(t)*bird.radius,bird.height+Math.sin(t*2)*.7,bird.centerZ+Math.cos(t)*bird.radius);
@@ -6183,7 +6210,7 @@
     updateAmbientAudio();
     updatePopups(dt);updateSpeedLines(dt,velocity.length());
     if(reticle) {reticle.classList.toggle('active',Boolean(rope||webGrab));reticle.classList.toggle('missed',feedbackTime>0);}
-    sky.position.copy(camera.position);sky.material.uniforms.altitude.value=position.y; sun.position.set(position.x-60,position.y+100,position.z+40); sun.target.position.copy(position); sun.target.updateMatrixWorld();
+    sky.position.copy(camera.position);sky.material.uniforms.altitude.value=position.y; updateEnvironment(dt);sun.position.copy(position).addScaledVector(sunDir,150); sun.target.position.copy(position); sun.target.updateMatrixWorld();
   }
   // A cached north-up city map, with only moving markers redrawn each frame.
   const minimap=document.getElementById('minimap'),mapContext=minimap.getContext('2d');
@@ -6606,6 +6633,158 @@
       burst(vent,1,[0xeef0f2,0xd8dcdf],{speed:.35,up:1.7,gravity:-.3,life:1.8,size:.9,drag:.8,spread:.4,opacity:.22});
   }
   function updateActivities(dt){updatePizza(dt);updateRaces(dt);updateGeysers(dt);updateSteam(dt);updateGalleries(dt);}
+  // ---- Time of day and weather ----
+  const clockHud=document.getElementById('clock');
+  let dayHour=17,nightAmount=0,duskAmount=0,weather='clear',weatherTarget='clear',weatherTimer=150,overcast=0,precipitation=0;
+  const sunDir=new THREE.Vector3(-.48,.8,.32),dayFog=new THREE.Color(0xb6c9d0),duskFog=new THREE.Color(0xd8a68a),nightFog=new THREE.Color(0x0c1320),rainFog=new THREE.Color(0x8b969c),snowFog=new THREE.Color(0xc9d3da),fogColor=new THREE.Color();
+  const daySun=new THREE.Color(0xffe3c4),duskSun=new THREE.Color(0xff9a5c),moonLight=new THREE.Color(0x8ea8d8);
+  // Street lamps glow after dark, with a soft pool of light on the pavement.
+  const glowTexture=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d'),r=g.createRadialGradient(32,32,0,32,32,32);r.addColorStop(0,'rgba(255,240,200,1)');r.addColorStop(.4,'rgba(255,214,150,.45)');r.addColorStop(1,'rgba(255,200,130,0)');g.fillStyle=r;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);})();
+  const lampGlowPositions=new Float32Array(streetLamps.length*3);
+  streetLamps.forEach((lamp,i)=>{lampGlowPositions.set([lamp.position.x-1.1,lamp.position.y+4.85,lamp.position.z],i*3);});
+  const lampGlowGeometry=new THREE.BufferGeometry();lampGlowGeometry.setAttribute('position',new THREE.BufferAttribute(lampGlowPositions,3));
+  const lampGlow=new THREE.Points(lampGlowGeometry,new THREE.PointsMaterial({map:glowTexture,size:3.2,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,color:0xffe2b0}));
+  const lampPools=new THREE.InstancedMesh(new THREE.PlaneGeometry(9,9),new THREE.MeshBasicMaterial({map:glowTexture,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}),streetLamps.length);
+  {const transform=new THREE.Object3D();streetLamps.forEach((lamp,i)=>{transform.position.set(lamp.position.x-1.1,.5,lamp.position.z);transform.rotation.set(-Math.PI/2,0,0);transform.updateMatrix();lampPools.setMatrixAt(i,transform.matrix);});}
+  for(const object of [lampGlow,lampPools]){object.frustumCulled=false;object.userData.projectile=true;object.raycast=()=>{};object.visible=false;scene.add(object);}
+  // Rain streaks and snowflakes follow the camera in a box.
+  const dropCount=2400,rainPositions=new Float32Array(dropCount*6),snowPositions=new Float32Array(dropCount*3),dropSeeds=new Float32Array(dropCount*3);
+  for(let i=0;i<dropCount;i++){dropSeeds[i*3]=Math.random()*70-35;dropSeeds[i*3+1]=Math.random()*40;dropSeeds[i*3+2]=Math.random()*70-35;}
+  const rainGeometry=new THREE.BufferGeometry();rainGeometry.setAttribute('position',new THREE.BufferAttribute(rainPositions,3));
+  const rain=new THREE.LineSegments(rainGeometry,new THREE.LineBasicMaterial({color:0xc4d2dc,transparent:true,opacity:.55,depthWrite:false}));
+  const snowGeometry=new THREE.BufferGeometry();snowGeometry.setAttribute('position',new THREE.BufferAttribute(snowPositions,3));
+  const snow=new THREE.Points(snowGeometry,new THREE.PointsMaterial({color:0xffffff,size:.16,transparent:true,opacity:.9,depthWrite:false}));
+  for(const object of [rain,snow]){object.frustumCulled=false;object.userData.projectile=true;object.raycast=()=>{};object.visible=false;scene.add(object);}
+  // Some pedestrians carry umbrellas that open when it rains.
+  const umbrellas=[];
+  {
+    const umbrellaColors=['#1f2d4a','#8c2f39','#2f4f3f','#1b1b1f','#c9a26b','#3f6f8f','#e0b84a'];
+    pedestrians.forEach((npc,i)=>{
+      if(npc.thug || npc.cop || npc.settled || random(npc.seed*3.1+7)>.24)return;
+      const b=new ToyKit.Builder(),color=umbrellaColors[i%umbrellaColors.length];
+      b.add(ToyKit.cone(.62,.3,12),color,{p:[0,2.25,0]});b.add(ToyKit.sphere(.035,6,4),color,{p:[0,2.42,0]});
+      b.rod([0,1.25,0],[0,2.25,0],.015,'#2b2b2b');
+      const umbrella=b.mesh();umbrella.position.set(.2,0,-.05);umbrella.visible=false;umbrella.castShadow=false;npc.group.add(umbrella);umbrellas.push(umbrella);
+    });
+  }
+  let rainSound=null;
+  function updateRainSound() {
+    if(!soundContext || soundContext.state!=='running' || !noiseBuffer)return;
+    if(!rainSound) {
+      const source=soundContext.createBufferSource(),filter=soundContext.createBiquadFilter(),gain=soundContext.createGain();
+      source.buffer=noiseBuffer;source.loop=true;filter.type='lowpass';filter.frequency.value=1600;gain.gain.value=0;
+      source.connect(filter);filter.connect(gain);gain.connect(effectsBus);source.start();rainSound={gain};
+    }
+    rainSound.gain.gain.setTargetAtTime(weather==='rain'?precipitation*.09:0,soundContext.currentTime,.5);
+  }
+  function setWeather(next) {
+    if(next===weatherTarget)return;
+    weatherTarget=next;
+    for(const umbrella of umbrellas)umbrella.visible=next==='rain';
+    if(next!=='clear')showBreaking(next==='rain'?'RAIN MOVING IN':'SNOW FALLING ACROSS THE CITY');
+  }
+  function updateEnvironment(dt) {
+    dayHour=(dayHour+dt*.025)%24;
+    // Sun elevation follows a simple arc from 6:00 to 18:00.
+    const angle=(dayHour-6)/12*Math.PI,elevation=Math.sin(angle);
+    sunDir.set(-Math.cos(angle)*.55,Math.max(-.6,elevation),.35).normalize();
+    nightAmount=1-THREE.MathUtils.smoothstep(elevation,-.18,.08);duskAmount=Math.exp(-((elevation-.05)**2)/.02)*(1-nightAmount*.7);
+    weatherTimer-=dt;
+    if(weatherTimer<=0){weatherTimer=150+Math.random()*180;const roll=Math.random();setWeather(roll<.55?'clear':roll<.85?'rain':'snow');}
+    if(weather!==weatherTarget && precipitation<.02)weather=weatherTarget;
+    const wet=weatherTarget!=='clear'&&weather===weatherTarget;
+    precipitation+=((wet?1:0)-precipitation)*(1-Math.exp(-dt*.25));overcast+=((weatherTarget==='clear'?0:.85)-overcast)*(1-Math.exp(-dt*.2));
+    const uniforms=sky.material.uniforms;uniforms.uSun.value.copy(sunDir);uniforms.uNight.value=nightAmount;uniforms.uDusk.value=duskAmount;uniforms.uOvercast.value=overcast;uniforms.uTime.value=elapsed;
+    // Lights, fog and exposure follow the sky.
+    const daylight=1-nightAmount;
+    sun.color.copy(daySun).lerp(duskSun,duskAmount).lerp(moonLight,nightAmount);sun.intensity=(3.15*daylight+.8*nightAmount)*(1-overcast*.55);
+    hemi.intensity=(1.38*daylight+.55*nightAmount)*(1-overcast*.2);hemi.color.setHex(nightAmount>.5?0x5a6f99:0xd9edff);fill.intensity=.55*daylight+.12;
+    fogColor.copy(dayFog).lerp(duskFog,duskAmount*.7).lerp(weather==='snow'?snowFog:rainFog,overcast*.8).lerp(nightFog,nightAmount);
+    scene.fog.color.copy(fogColor);scene.background.copy(fogColor);
+    scene.fog.far=THREE.MathUtils.lerp(1150,weather==='snow'?520:430,precipitation);scene.fog.near=THREE.MathUtils.lerp(260,60,precipitation);
+    renderer.toneMappingExposure=1.12-nightAmount*.12;
+    for(const facade of nightFacades)facade.emissiveIntensity=nightAmount*.85;
+    headlightMat.emissiveIntensity=.38+nightAmount*2.2;
+    lampGlow.visible=lampPools.visible=nightAmount>.05;lampGlow.material.opacity=nightAmount;lampPools.material.opacity=nightAmount*.45;
+    // Precipitation wraps around the camera.
+    rain.visible=weather==='rain' && precipitation>.02;snow.visible=weather==='snow' && precipitation>.02;
+    rain.material.opacity=.55*precipitation;snow.material.opacity=.9*precipitation;
+    if(rain.visible||snow.visible) {
+      const c=camera.position,t=elapsed;
+      for(let i=0;i<dropCount;i++) {
+        const sx=dropSeeds[i*3],sz=dropSeeds[i*3+2];
+        if(rain.visible) {
+          const fall=(dropSeeds[i*3+1]-t*34)%40,y=c.y+20+(fall<0?fall+40:fall)-20;
+          const x=c.x+((sx-c.x%70+105)%70)-35,z=c.z+((sz-c.z%70+105)%70)-35;
+          rainPositions.set([x,y,z,x+.05,y+.9,z+.03],i*6);
+        } else {
+          const fall=(dropSeeds[i*3+1]-t*2.2)%40,y=c.y+20+(fall<0?fall+40:fall)-20;
+          const x=c.x+((sx+Math.sin(t+i)*.8-c.x%70+105)%70)-35,z=c.z+((sz-c.z%70+105)%70)-35;
+          snowPositions.set([x,y,z],i*3);
+        }
+      }
+      (rain.visible?rainGeometry:snowGeometry).attributes.position.needsUpdate=true;
+    }
+    updateRainSound();
+    if(clockHud){const hour=Math.floor(dayHour),minute=Math.floor((dayHour%1)*60);clockHud.textContent=`${(hour+11)%12+1}:${String(minute).padStart(2,'0')} ${hour<12?'AM':'PM'}${weather==='rain'?' • Rain':weather==='snow'?' • Snow':''}`;}
+  }
+  // ---- City events: a parade balloon and river traffic ----
+  const balloon=(()=>{
+    const b=new ToyKit.Builder(),tan='#c99a63',red='#d33a35',dark='#2a1d16';
+    b.add(ToyKit.sphere(1,20,14),tan,{s:[5,4.2,7.5]});b.add(ToyKit.sphere(1,20,14),tan,{p:[0,3.6,-6.5],s:[4.2,4,4]});
+    b.add(ToyKit.sphere(1,16,12),'#a07447',{p:[0,2.5,-10.2],s:[2.2,1.6,1.5]});b.add(ToyKit.sphere(.8,10,8),dark,{p:[0,3.1,-11.6]});
+    for(const side of [-1,1]) {
+      b.add(ToyKit.cone(1.5,2.6,10),'#8a6038',{p:[side*3,7.3,-6],r:[0,0,side*.5]});
+      b.add(ToyKit.sphere(.7,12,8),'#f4f1ea',{p:[side*1.5,4.7,-9.9]});b.add(ToyKit.sphere(.38,10,8),dark,{p:[side*1.5,4.7,-10.4]});
+      for(const z of [-4,4])b.ellipsoid([side*2.6,-2.5,z],[side*2.8,-6.5,z],1.2,1.2,tan,0,1);
+    }
+    b.add(ToyKit.torus(4.25,.55,8,24),red,{p:[0,3.8,-6.4],r:[0,0,0],s:[1,.3,1]});
+    b.add(ToyKit.cone(1.4,4,8),tan,{p:[0,2,8.4],r:[Math.PI/2+.4,0,0]});
+    const group=new THREE.Group(),body=b.mesh();body.userData.balloon=true;group.add(body);group.visible=false;group.userData.skyline=true;scene.add(group);
+    const ropes=new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(new Float32Array(6*6),3)),new THREE.LineBasicMaterial({color:0xe8e2d4}));
+    ropes.frustumCulled=false;ropes.raycast=()=>{};ropes.userData.projectile=true;scene.add(ropes);ropes.visible=false;
+    grappleMeshes.push(body);
+    return {group,body,ropes,active:false,popped:0,hits:0,z:0,timer:200};
+  })();
+  function hitBalloon() {
+    if(!balloon.active || balloon.popped)return;
+    balloon.hits++;playEffect('splat',balloon.group.position);
+    if(balloon.hits>=8){balloon.popped=.001;playEffect('collapse',balloon.group.position);awardChaos(800,'PARADE BALLOON POPPED',balloon.group.position.clone(),'hit');addHeat(1.2);impactFeedback(3);
+      burst(balloon.group.position,90,[0xc99a63,0xd33a35,0xffffff],{speed:18,up:6,life:1.6,size:.6});}
+  }
+  function updateBalloon(dt) {
+    const event=balloon,group=event.group;
+    if(!event.active) {
+      event.timer-=dt;
+      if(event.timer<=0 && !nuke){event.active=true;event.z=-205;event.hits=0;event.popped=0;group.visible=event.ropes.visible=true;group.scale.setScalar(1);showBreaking('THE PARADE IS COMING DOWN CENTRAL PARK WEST');}
+      return;
+    }
+    if(event.popped) {
+      event.popped+=dt;group.position.y+=dt*(10+event.popped*12);group.rotation.z+=dt*3;group.scale.setScalar(Math.max(.05,1-event.popped*.45));event.ropes.visible=false;
+      if(event.popped>2.5){event.active=false;group.visible=false;event.timer=420;}
+      return;
+    }
+    event.z+=dt*2.6;group.position.set(-80,34+Math.sin(elapsed*.6)*.8,event.z);group.rotation.set(Math.sin(elapsed*.4)*.04,Math.PI,Math.sin(elapsed*.5)*.05);
+    const ropes=event.ropes.geometry.attributes.position;
+    [[-3,-4],[3,-4],[-3,4],[3,4],[-1.5,-9],[1.5,-9]].forEach(([dx,dz],i)=>{ropes.setXYZ(i*2,-80+dx,30,event.z-dz);ropes.setXYZ(i*2+1,-80+dx*1.8,.6,event.z-dz*1.2);});
+    ropes.needsUpdate=true;event.ropes.geometry.computeBoundingSphere();
+    if(event.z>330){event.active=false;group.visible=event.ropes.visible=false;event.timer=420;}
+  }
+  function makeBoat(hull,cabin,length) {
+    const b=new ToyKit.Builder();
+    b.add(ToyKit.roundedBox(length*.32,1.6,length,.6),hull,{p:[0,.3,0]});b.add(ToyKit.roundedBox(length*.24,2.2,length*.35,.3),cabin,{p:[0,2.2,length*.08]});
+    b.add(ToyKit.cylinder(.35,.45,2.2,10),'#2b2b2b',{p:[0,4,length*.15]});
+    const group=new THREE.Group(),mesh=b.mesh();group.add(mesh);group.userData.skyline=true;scene.add(group);grappleMeshes.push(mesh);return group;
+  }
+  const boats=[
+    {group:makeBoat('#d9732a','#f2f0ea',30),x:()=>-40,z:t=>1120+Math.sin(t*.02)*90,heading:t=>Math.cos(t*.02)>0?0:Math.PI},
+    {group:makeBoat('#b8342f','#2b3a4a',12),x:()=>312,z:t=>200+Math.sin(t*.015)*700,heading:t=>Math.cos(t*.015)>0?0:Math.PI},
+    {group:makeBoat('#2f5c8a','#f2f0ea',12),x:()=>-345,z:t=>-100+Math.sin(t*.012+2)*650,heading:t=>Math.cos(t*.012+2)>0?0:Math.PI}
+  ];
+  function updateEvents(dt) {
+    updateBalloon(dt);
+    for(const boat of boats){boat.group.position.set(boat.x(elapsed),-.25+Math.sin(elapsed*1.3)*.08,boat.z(elapsed));boat.group.rotation.y=boat.heading(elapsed);}
+  }
   // Distance LOD: city chunks beyond the detail radius move to a hidden layer and
   // their towers are drawn by a few instanced stand-ins, cutting draw calls sharply.
   const lodHiddenLayer=3,lodNear=250,lodCell=120,lodChunks=new Map(),lodProxies=[];
@@ -6690,7 +6869,7 @@
     bosses:bosses.filter(b=>b.status==='active').map(b=>({name:b.name,hp:+b.hp.toFixed(1),x:+b.actor.group.position.x.toFixed(1),z:+b.actor.group.position.z.toFixed(1)}))
   });
   // Opt-in test hook for automated playtesting: open the game with ?debug.
-  if(new URLSearchParams(location.search).has("debug"))window.__spida={renderer,scene,camera,hero,grappleMeshes,buildings,playerBuildingColliders,position,velocity,keys,pedestrians,cars,chargeProps,tethers,bosses,progress,mutators,raceCourses,pizzaSpots,bouncePads,pressureTanks,targetGalleries,beginWebAction,endWebAction,jump,dodge,spiderSlap,fireBomb,webZip,hitPlayer,activateBoss,launchNuke,setMutator,setCameraMode,startCityEvent,clearCityEvent,reset,
+  if(new URLSearchParams(location.search).has("debug"))window.__spida={setTime:hour=>{dayHour=hour;},setWeather:next=>{setWeather(next);weather=next;precipitation=next==='clear'?0:1;overcast=next==='clear'?0:.85;},renderer,scene,camera,hero,grappleMeshes,buildings,playerBuildingColliders,position,velocity,keys,pedestrians,cars,chargeProps,tethers,bosses,progress,mutators,raceCourses,pizzaSpots,bouncePads,pressureTanks,targetGalleries,beginWebAction,endWebAction,jump,dodge,spiderSlap,fireBomb,webZip,hitPlayer,activateBoss,launchNuke,setMutator,setCameraMode,startCityEvent,clearCityEvent,reset,
     step:dt=>{if(!paused)update(dt);},updateViewCamera,poseWalkingArms,pedestrianHandPoint,fleeDanger,updateThug,updateKnockback,enemyProjectiles,detonateNuke,updateNuke,
     nukeState:()=>nuke?{phase:nuke.phase,time:nuke.time,radius:nuke.radius,target:nuke.target.clone(),playerHit:nuke.playerHit,playerHitAt:nuke.playerHitAt,blackout,waveOpacity:nuke.wave?.material.opacity??0,windOpacity:Number(blastWind.style.opacity)||0}:null,
     look:(y,p)=>{yaw=y;pitch=p;},teleport:(x,y,z)=>{position.set(x,y,z);velocity.set(0,0,0);onGround=false;},
