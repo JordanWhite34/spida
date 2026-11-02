@@ -5,15 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Skyline Swing</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <main class="game-shell">
     <canvas id="game" tabindex="0" aria-label="City swinging game"></canvas>
+    <section id="title" class="title-screen loading" aria-labelledby="title-name">
+      <div class="title-card">
+        <p class="title-kicker">A WEB-SLINGING SANDBOX</p>
+        <h1 id="title-name">SKYLINE SWING</h1>
+        <div class="title-loading" role="status"><i><em></em></i><span>Building the city…</span></div>
+        <div class="title-actions">
+          <button id="title-play" type="button" class="title-play">Play</button>
+          <button id="title-new" type="button" class="title-new" hidden>New game</button>
+        </div>
+        <p class="title-controls"><span>Mouse: look</span><span>Left click: swing</span><span>WASD: move</span><span>Space: jump</span><span>F: slap</span><span>Esc: pause</span></p>
+      </div>
+    </section>
 
     <div id="speed-blur" class="speed-blur" aria-hidden="true"><div></div><div></div></div>
     <div class="screen-shade" aria-hidden="true"></div>
     <canvas id="minimap" width="320" height="320" aria-label="City minimap showing your position, landmarks, and Rhino"></canvas>
+    <div id="heat" class="heat" aria-label="Police heat" hidden></div>
     <canvas id="speed-lines" class="speed-lines" aria-hidden="true"></canvas>
     <div id="popups" class="popups" aria-hidden="true"></div>
     <div class="reticle" aria-hidden="true"><span></span></div>
@@ -29,6 +42,7 @@
     <div id="hits" class="hits" hidden></div>
     <div id="district" class="district" hidden><b></b><span></span></div>
     <div class="sense-edge" aria-hidden="true"></div>
+    <div id="hint" class="hint-box" role="status" aria-live="polite" hidden></div>
     <div id="breaking" class="breaking" role="status" aria-live="polite" hidden><b>BREAKING</b><span id="breaking-text"></span></div>
     <div id="boss-bar" class="boss-bar" hidden><div class="boss-head"><strong id="boss-name"></strong><em id="boss-tag"></em></div><small id="boss-title"></small><i><span id="boss-health"></span></i></div>
     <div id="blast-flash" aria-hidden="true"></div>
@@ -80,6 +94,7 @@
         <button id="music-toggle" class="music-toggle" type="button" aria-pressed="true">Music: On</button>
         <button id="effects-toggle" class="music-toggle" type="button" aria-pressed="true">Sound effects: On</button>
         <button id="graphics-toggle" class="music-toggle" type="button">Graphics: Balanced</button>
+        <button id="hud-toggle" class="music-toggle" type="button">HUD: Full</button>
         <button id="camera-toggle" class="music-toggle" type="button">Camera: Third person</button>
         <button id="resume-game" class="resume-game">Resume game</button>
       </section>
@@ -90,7 +105,7 @@
   <script src="toy-models.js?v=6"></script>
   <script src="arms-model.js"></script>
   <script src="billboard-image.js"></script>
-  <script src="game.js?v=13"></script>
+  <script src="game.js?v=17"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}</script>
   <script type="module" src="featured-model.js?v=2"></script>
 </body>
