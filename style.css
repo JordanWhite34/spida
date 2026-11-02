@@ -262,3 +262,20 @@ kbd { display: inline-block; min-width: 24px; margin-right: 2px; padding: 3px 5p
 @keyframes heat-flash { 50% { color:#5b8cff; text-shadow:0 0 6px #5b8cff; } }
 .game-shell.hud-minimal .heat { top:196px; }
 @media (max-width:600px) { .heat { top:176px; right:10px; } }
+
+/* Settings and key bindings */
+.settings { display:grid; gap:8px; }
+.settings label { display:grid; grid-template-columns:150px 1fr 44px; align-items:center; gap:10px; font-size:14px; color:#d8e1e1; }
+.settings label.check { display:flex; gap:8px; }
+.settings input[type=range] { width:100%; accent-color:#e3423c; }
+.settings output { font-variant-numeric:tabular-nums; color:#fff; text-align:right; }
+.bindings { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+.bindings div { display:flex; justify-content:space-between; align-items:center; font-size:14px; color:#d8e1e1; }
+.bindings button { min-width:74px; padding:5px 8px; border:1px solid rgba(211,226,231,.35); border-radius:6px; background:#233943; color:#fff; font:700 12px/1 inherit; cursor:pointer; }
+.bindings button.listening { border-color:#ffd25e; color:#ffd25e; }
+@media (max-width:520px) { .settings label { grid-template-columns:1fr 1fr 40px; } .bindings { grid-template-columns:1fr; } }
+
+/* Photo mode hides the HUD and shows a small control bar */
+.photo-bar { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); padding:7px 12px; border-radius:8px; background:rgba(10,18,26,.75); color:#fff; font-size:12px; font-weight:700; white-space:nowrap; pointer-events:none; display:none; }
+.game-shell.photo .photo-bar { display:block; }
+.game-shell.photo > :not(#game):not(.photo-bar) { visibility:hidden; }

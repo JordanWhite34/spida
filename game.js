@@ -2837,7 +2837,7 @@
   const speedLines=document.getElementById('speed-lines'),speedContext=speedLines?.getContext('2d'),streaks=[];
   function updateSpeedLines(dt,speed) {
     if(!speedContext)return;
-    const w=Math.round(innerWidth/2),h=Math.round(innerHeight/2),amount=THREE.MathUtils.smoothstep(speed,24,62)*(slowMotion?.4:1);
+    const w=Math.round(innerWidth/2),h=Math.round(innerHeight/2),amount=settings.reduceMotion?0:THREE.MathUtils.smoothstep(speed,24,62)*(slowMotion?.4:1);
     // Resizing a canvas recreates its drawing surface; only do it when the viewport changes.
     if(speedLines.width!==w || speedLines.height!==h){speedLines.width=w;speedLines.height=h;}
     else if(amount>0 || streaks.length)speedContext.clearRect(0,0,w,h);
@@ -2872,7 +2872,7 @@
     const button=document.querySelector(`[data-mutator="${name}"]`);if(button){button.setAttribute('aria-pressed',String(value));button.classList.toggle('on',value);}
   }
   document.querySelectorAll('[data-mutator]').forEach(button=>button.addEventListener('click',()=>setMutator(button.dataset.mutator,!mutators[button.dataset.mutator])));
-  function impactFeedback(strength) {hitStop=Math.max(hitStop,Math.min(.09,.03+strength*.012));screenShake=Math.min(1.2,screenShake+strength*.12);}
+  function impactFeedback(strength) {hitStop=Math.max(hitStop,Math.min(.09,.03+strength*.012));if(!settings.reduceMotion)screenShake=Math.min(1.2,screenShake+strength*.12);}
   // Spider-slap: a short melee cone that sends anything in front flying.
   function spiderSlap() {
     if(paused || koTimer>0)return;
@@ -3535,6 +3535,52 @@
     hintsSeen.add(next.id);try{localStorage.setItem('spida.hints',JSON.stringify([...hintsSeen]));}catch(_){/* Session only. */}
     activeHint={...next,time:0};hintBox.textContent=next.text;hintBox.hidden=false;hintBox.classList.add('show');
   }
+  // ---- Player settings: look, field of view, volume, motion and key bindings ----
+  const settings={sensitivity:1,fov:72,music:.8,effects:1,invert:false,reduceMotion:false};
+  try{Object.assign(settings,JSON.parse(localStorage.getItem('spida.settings')||'{}'));}catch(_){/* Defaults. */}
+  const defaultKeys={zip:'KeyE',slap:'KeyF',dodge:'KeyC',camera:'KeyV',slowmo:'KeyT',photo:'KeyP',nuke:'KeyN',reset:'KeyR'};
+  const keyLabels={zip:'Web zip',slap:'Spider-slap',dodge:'Dodge',camera:'Switch camera',slowmo:'Slow motion',photo:'Photo mode',nuke:'Nuke',reset:'Reset'};
+  let keyBindings={...defaultKeys};
+  try{Object.assign(keyBindings,JSON.parse(localStorage.getItem('spida.keys')||'{}'));}catch(_){/* Defaults. */}
+  function saveSettings(){try{localStorage.setItem('spida.settings',JSON.stringify(settings));localStorage.setItem('spida.keys',JSON.stringify(keyBindings));}catch(_){/* Session only. */}}
+  // Rebound keys are translated back to the default codes the input handlers expect.
+  function remapKey(code) {
+    for(const [action,key] of Object.entries(keyBindings))if(key===code)return defaultKeys[action];
+    return Object.values(defaultKeys).includes(code)?'':code;
+  }
+  const keyName=code=>code.replace(/^Key/,'').replace(/^Digit/,'').replace('ShiftLeft','L-Shift').replace('ControlLeft','L-Ctrl');
+  function buildSettingsUi() {
+    for(const [id,key,format] of [['set-sensitivity','sensitivity',v=>`${(+v).toFixed(1)}×`],['set-fov','fov',v=>`${v}°`],['set-music','music',v=>`${Math.round(v*100)}%`],['set-effects','effects',v=>`${Math.round(v*100)}%`]]) {
+      const input=document.getElementById(id);if(!input)continue;const output=input.nextElementSibling;
+      input.value=settings[key];output.textContent=format(input.value);
+      input.addEventListener('input',()=>{settings[key]=+input.value;output.textContent=format(input.value);saveSettings();applyVolumes();});
+    }
+    for(const [id,key] of [['set-invert','invert'],['set-motion','reduceMotion']]) {
+      const input=document.getElementById(id);if(!input)continue;input.checked=settings[key];
+      input.addEventListener('change',()=>{settings[key]=input.checked;saveSettings();});
+    }
+    const list=document.getElementById('bindings');if(!list)return;
+    list.innerHTML='';
+    for(const action of Object.keys(defaultKeys)) {
+      const row=document.createElement('div'),button=document.createElement('button');button.type='button';button.textContent=keyName(keyBindings[action]);
+      row.append(keyLabels[action],button);list.appendChild(row);
+      button.addEventListener('click',()=>{
+        // The next key pressed becomes the binding; Escape cancels.
+        button.classList.add('listening');button.textContent='Press a key';
+        const capture=event=>{
+          event.preventDefault();event.stopImmediatePropagation();window.removeEventListener('keydown',capture,true);button.classList.remove('listening');
+          if(event.code!=='Escape'){for(const other of Object.keys(keyBindings))if(keyBindings[other]===event.code)keyBindings[other]=keyBindings[action];keyBindings[action]=event.code;saveSettings();}
+          buildSettingsUi();
+        };
+        window.addEventListener('keydown',capture,true);
+      });
+    }
+  }
+  function applyVolumes() {
+    if(!soundContext)return;
+    if(musicBus)musicBus.gain.setTargetAtTime(musicEnabled?settings.music:0,soundContext.currentTime,.05);
+    syncEffectsBus();
+  }
   function movement() {
     const strafe=(keys.right?1:0)-(keys.left?1:0), forward=(keys.forward?1:0)-(keys.back?1:0);
     return new THREE.Vector3(strafe*Math.cos(yaw)-forward*Math.sin(yaw),0,-strafe*Math.sin(yaw)-forward*Math.cos(yaw));
@@ -3579,7 +3625,7 @@
   const soundStats={played:0,last:null,recent:[],errors:[]};
   function syncEffectsBus() {
     const audible=effectsEnabled && !paused && !document.hidden;
-    if(effectsBus && soundContext)effectsBus.gain.setTargetAtTime(audible?1:0,soundContext.currentTime,.025);
+    if(effectsBus && soundContext)effectsBus.gain.setTargetAtTime(audible?settings.effects:0,soundContext.currentTime,.025);
     for(const audio of [fileWind,fileEngine])if(audio)audio.muted=!audible;
     if(nukeFallTone instanceof HTMLMediaElement)nukeFallTone.muted=!audible;
     if(!audible)for(const audio of [...fallbackVoices])audio.effectStop();
@@ -3756,14 +3802,44 @@
     voice.connect(filter);filter.connect(gain);gain.connect(musicBus);
     voice.start(time);voice.stop(time+duration+.01);
   }
+  const musicStyles={
+    manhattan:{shift:0,lead:'triangle'},
+    brooklyn:{shift:-5,lead:'square',chords:[[48,51,55,58],[44,48,51,55],[46,50,53,56],[43,47,50,53]]},
+    harlem:{shift:2,lead:'sine',chords:[[48,52,55,59],[45,48,52,55],[50,53,57,60],[43,47,50,53]]}
+  };
+  function musicStyleFor() {
+    const area=currentDistrict||'';
+    return /BROOKLYN|DUMBO|CONEY/.test(area)?musicStyles.brooklyn:/HARLEM/.test(area)?musicStyles.harlem:musicStyles.manhattan;
+  }
+  function musicIntensity(){return stars()>0||Boolean(focusBoss)||Boolean(crime && Math.hypot(crime.x-position.x,crime.z-position.z)<45);}
+  function musicDrum(kind,time) {
+    if(kind==='kick') {
+      const voice=soundContext.createOscillator(),gain=soundContext.createGain();
+      voice.frequency.setValueAtTime(130,time);voice.frequency.exponentialRampToValueAtTime(42,time+.13);
+      gain.gain.setValueAtTime(.11,time);gain.gain.exponentialRampToValueAtTime(.0001,time+.18);
+      voice.connect(gain);gain.connect(musicBus);voice.start(time);voice.stop(time+.2);return;
+    }
+    if(!noiseBuffer)return;
+    const noise=soundContext.createBufferSource(),filter=soundContext.createBiquadFilter(),gain=soundContext.createGain(),hat=kind==='hat';
+    noise.buffer=noiseBuffer;filter.type=hat?'highpass':'bandpass';filter.frequency.value=hat?7000:1800;
+    gain.gain.setValueAtTime(hat?.012:.045,time);gain.gain.exponentialRampToValueAtTime(.0001,time+(hat?.04:.13));
+    noise.connect(filter);filter.connect(gain);gain.connect(musicBus);noise.start(time);noise.stop(time+.15);
+  }
   function scheduleMusic() {
     if(!soundContext || soundContext.state!=='running' || !musicEnabled || document.hidden || nuke)return;
     const now=soundContext.currentTime;
     if(nextMusicNote<now)nextMusicNote=now;
     while(nextMusicNote<now+.15) {
       const step=musicStep%64, bar=Math.floor(step/8), beat=step%8;
-      const chord=musicChords[bar%musicChords.length], note=musicMelody[step];
-      if(note!==null)musicTone(note,nextMusicNote,musicBeat*.65,.028,'triangle',2000);
+      // Each borough gets its own harmony and key; fights add drums.
+      const style=musicStyleFor(),chords=style.chords||musicChords;
+      const chord=chords[bar%chords.length].map(n=>n+style.shift), raw=musicMelody[step], note=raw===null?null:raw+style.shift;
+      if(note!==null)musicTone(note,nextMusicNote,musicBeat*.65,.028,style.lead,2000);
+      if(musicIntensity()) {
+        if(beat===0||beat===4)musicDrum('kick',nextMusicNote);
+        if(beat===2||beat===6)musicDrum('snare',nextMusicNote);
+        musicDrum('hat',nextMusicNote);
+      }
       if(beat===0) {
         for(const tone of chord)musicTone(tone,nextMusicNote,musicBeat*3.6,.012,'triangle',1100);
       }
@@ -3778,14 +3854,14 @@
     musicToggle.setAttribute('aria-pressed',String(musicEnabled));
     if(musicEnabled){nextMusicNote=0;unlockSound();if(nuke && !paused)playNukeMusic();else scheduleMusic();}
     else if(nukeMusic)nukeMusic.pause();
-    if(musicBus && soundContext)musicBus.gain.setTargetAtTime(musicEnabled?1:0,soundContext.currentTime,.015);
+    if(musicBus && soundContext)musicBus.gain.setTargetAtTime(musicEnabled?settings.music:0,soundContext.currentTime,.015);
   });
   function unlockSound() {
     const Audio=window.AudioContext||window.webkitAudioContext;
     if(!Audio)return;
     try {
       if(!soundContext){
-        soundContext=new Audio();musicBus=soundContext.createGain();musicBus.gain.value=musicEnabled?1:0;musicBus.connect(soundContext.destination);
+        soundContext=new Audio();musicBus=soundContext.createGain();musicBus.gain.value=musicEnabled?settings.music:0;musicBus.connect(soundContext.destination);
         effectsBus=soundContext.createGain();effectsBus.gain.value=effectsEnabled&&!paused?1:0;
         const limiter=soundContext.createDynamicsCompressor();limiter.threshold.value=-8;limiter.knee.value=8;limiter.ratio.value=8;limiter.attack.value=.004;limiter.release.value=.18;
         effectsBus.connect(limiter);limiter.connect(soundContext.destination);
@@ -5935,8 +6011,8 @@
     const lateral=velocity.x*Math.cos(yaw)-velocity.z*Math.sin(yaw);
     const blastShake=nuke?.phase==='blast'&&nuke.playerHit?Math.max(0,1-(nuke.time-nuke.playerHitAt)/5):0;
     const targetRoll=(onGround?-lateral*.0015:THREE.MathUtils.clamp(-lateral*.0035,-.095,.095)) + Math.sin(elapsed*14)*Math.min(playerImpact,1)*.24+Math.sin(elapsed*19)*blastShake*.07;
-    cameraRoll+=(targetRoll-cameraRoll)*(1-Math.exp(-4*dt));
-    const targetFov=72+Math.min(speed/38,1)*9+(rope?2:0)-(slowMotion?6:0);
+    cameraRoll+=(targetRoll*(settings.reduceMotion?.15:1)-cameraRoll)*(1-Math.exp(-4*dt));
+    const targetFov=settings.fov+(settings.reduceMotion?0:Math.min(speed/38,1)*9+(rope?2:0))-(slowMotion?6:0);
     camera.fov+=(targetFov-camera.fov)*(1-Math.exp(-3*dt));camera.updateProjectionMatrix();
     const shake=screenShake*screenShake*.35;
     updateViewCamera(dt,bob,shake);
@@ -6187,10 +6263,46 @@
     try{for(const key of Object.keys(localStorage))if(key.startsWith('spida.') && !['spida.camera','spida.graphics','spida.hud'].includes(key))localStorage.removeItem(key);}catch(_){/* Nothing to erase. */}
     location.reload();
   });
-  function frame(t) { const raw=Math.min((t-last)/1000||0,.033); last=t;if(titleOpen){drawTitle(raw);requestAnimationFrame(frame);return;}if(paused){requestAnimationFrame(frame);return;} timeScale+=((slowMotion||dodgeSlow>0?.3:1)-timeScale)*(1-Math.exp(-10*raw));let dt=raw*timeScale;if(hitStop>0){hitStop-=raw;dt*=.06;} update(dt);drawFrame(dt);requestAnimationFrame(frame); }
+  // ---- Photo mode: frozen time, a free camera, filters and saved snapshots ----
+  const photoFilters=[['Natural','none'],['Noir','grayscale(1) contrast(1.25)'],['Golden hour','sepia(.35) saturate(1.35) brightness(1.05)'],['Comic','saturate(1.8) contrast(1.35)']];
+  const photoBar=document.getElementById('photo-bar');
+  let photoMode=null;
+  function togglePhotoMode() {
+    const shellElement=document.querySelector('.game-shell');
+    if(photoMode) {
+      yaw=photoMode.yaw;pitch=photoMode.pitch;canvas.style.filter='';shellElement.classList.remove('photo');photoMode=null;last=performance.now();return;
+    }
+    photoMode={camera:camera.position.clone(),yaw,pitch,filter:0,move:{}};shellElement.classList.add('photo');updatePhotoBar();
+  }
+  function updatePhotoBar(){if(photoBar)photoBar.textContent=`Photo mode • WASD fly, Space/Ctrl up/down • 1-4 filter: ${photoFilters[photoMode.filter][0]} • Enter save • P exit`;}
+  function drawPhoto(raw) {
+    const move=photoMode.move,forward=new THREE.Vector3(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch)),right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    const speed=(move.fast?30:10)*raw;
+    if(move.forward)camera.position.addScaledVector(forward,speed);if(move.back)camera.position.addScaledVector(forward,-speed);
+    if(move.right)camera.position.addScaledVector(right,speed);if(move.left)camera.position.addScaledVector(right,-speed);
+    if(move.up)camera.position.y+=speed;if(move.down)camera.position.y-=speed;
+    camera.rotation.set(pitch,yaw,0,'YXZ');sky.position.copy(camera.position);renderer.clear();renderer.render(scene,camera);
+  }
+  function savePhoto() {
+    renderer.clear();renderer.render(scene,camera);
+    // Bake the chosen filter into the saved image.
+    const out=document.createElement('canvas');out.width=canvas.width;out.height=canvas.height;const context=out.getContext('2d');
+    context.filter=photoFilters[photoMode.filter][1];context.drawImage(canvas,0,0);
+    out.toBlob(blob=>{if(!blob)return;const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`skyline-swing-${Date.now()}.png`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2000);});
+    playEffect('success');
+  }
+  function photoKey(e,down) {
+    const move=photoMode.move,map={KeyW:'forward',KeyS:'back',KeyA:'left',KeyD:'right',Space:'up',ControlLeft:'down',ShiftLeft:'fast'};
+    if(map[e.code]){move[map[e.code]]=down;e.preventDefault();return;}
+    if(!down)return;
+    if(/^Digit[1-4]$/.test(e.code)){photoMode.filter=+e.code.slice(5)-1;canvas.style.filter=photoFilters[photoMode.filter][1];updatePhotoBar();}
+    else if(e.code==='Enter')savePhoto();
+    else if(remapKey(e.code)==='KeyP'||e.code==='Escape'){e.preventDefault();togglePhotoMode();}
+  }
+  function frame(t) { const raw=Math.min((t-last)/1000||0,.033); last=t;if(titleOpen){drawTitle(raw);requestAnimationFrame(frame);return;}if(photoMode){drawPhoto(raw);requestAnimationFrame(frame);return;}if(paused){requestAnimationFrame(frame);return;} timeScale+=((slowMotion||dodgeSlow>0?.3:1)-timeScale)*(1-Math.exp(-10*raw));let dt=raw*timeScale;if(hitStop>0){hitStop-=raw;dt*=.06;} update(dt);drawFrame(dt);requestAnimationFrame(frame); }
   const map={KeyW:'forward',ArrowUp:'forward',KeyS:'back',ArrowDown:'back',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right'};
-  window.addEventListener('keydown',e=>{ if(e.code==='Tab'){e.preventDefault();opinionPanel?.classList.add('held');return;} if(titleOpen){if(e.code==='Enter'){e.preventDefault();startGame();}return;} if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(e.code==='KeyR'&&!e.repeat)reset(); if(e.code==='KeyV'&&!e.repeat)toggleCameraMode(); if(e.code==='KeyE'&&!e.repeat)webZip(); if(e.code==='KeyC'&&!e.repeat)dodge(); if(e.code==='KeyN'&&!e.repeat)launchNuke(); if((e.code==='KeyF'||e.code==='KeyQ')&&!e.repeat)spiderSlap(); if(e.code==='KeyT'){slowMotion=true;document.querySelector('.game-shell').classList.add('slowmo');} if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
-  window.addEventListener('keyup',e=>{ if(e.code==='Tab')opinionPanel?.classList.remove('held'); if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; if(e.code==='KeyT'){slowMotion=false;document.querySelector('.game-shell').classList.remove('slowmo');} });
+  window.addEventListener('keydown',e=>{ const code=remapKey(e.code); if(photoMode){photoKey(e,true);return;} if(code==='KeyP'&&!e.repeat&&!titleOpen&&!paused){togglePhotoMode();return;} if(e.code==='Tab'){e.preventDefault();opinionPanel?.classList.add('held');return;} if(titleOpen){if(e.code==='Enter'){e.preventDefault();startGame();}return;} if(e.code==='Escape'){e.preventDefault();if(!e.repeat && !(paused && performance.now()-pointerUnlockTime<300))setPaused(!paused);return;} if(paused)return; if (map[e.code]) { e.preventDefault(); keys[map[e.code]]=true; } if(code==='KeyR'&&!e.repeat)reset(); if(code==='KeyV'&&!e.repeat)toggleCameraMode(); if(code==='KeyE'&&!e.repeat)webZip(); if(code==='KeyC'&&!e.repeat)dodge(); if(code==='KeyN'&&!e.repeat)launchNuke(); if((code==='KeyF'||code==='KeyQ')&&!e.repeat)spiderSlap(); if(code==='KeyT'){slowMotion=true;document.querySelector('.game-shell').classList.add('slowmo');} if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();} if(e.code==='ShiftLeft'||e.code==='ShiftRight'){e.preventDefault();keys.sprint=true;} });
+  window.addEventListener('keyup',e=>{ const code=remapKey(e.code); if(photoMode){photoKey(e,false);return;} if(e.code==='Tab')opinionPanel?.classList.remove('held'); if(map[e.code])keys[map[e.code]]=false; if(e.code==='ShiftLeft'||e.code==='ShiftRight')keys.sprint=false; if(code==='KeyT'){slowMotion=false;document.querySelector('.game-shell').classList.remove('slowmo');} });
   window.addEventListener('blur',()=>{ Object.keys(keys).forEach(k=>keys[k]=false); cancelWebGrab();swing(false); });
   canvas.addEventListener('pointerdown',e=>{
     if(paused)return;
@@ -6208,10 +6320,10 @@
   });
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   window.addEventListener('pointerup',e=>{if(!paused && e.pointerType==='mouse' && e.button===0){const locked=document.pointerLockElement===canvas,rect=canvas.getBoundingClientRect();endWebAction(locked?0:(e.clientX-rect.left)/rect.width*2-1,locked?0:1-(e.clientY-rect.top)/rect.height*2);}});
-  document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas) { yaw-=e.movementX*.0025; pitch=THREE.MathUtils.clamp(pitch-e.movementY*.0025,-1.35,1.35); }});
+  document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas) { yaw-=e.movementX*.0025*settings.sensitivity; pitch=THREE.MathUtils.clamp(pitch-e.movementY*.0025*settings.sensitivity*(settings.invert?-1:1),-1.35,1.35); }});
   let touchX=0,touchY=0;
   canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'){touchX=e.clientX;touchY=e.clientY;}});
-  canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse' && e.buttons){yaw-=(e.clientX-touchX)*.005;pitch=THREE.MathUtils.clamp(pitch-(e.clientY-touchY)*.005,-1.35,1.35);touchX=e.clientX;touchY=e.clientY;}});
+  canvas.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse' && e.buttons){yaw-=(e.clientX-touchX)*.005*settings.sensitivity;pitch=THREE.MathUtils.clamp(pitch-(e.clientY-touchY)*.005*settings.sensitivity*(settings.invert?-1:1),-1.35,1.35);touchX=e.clientX;touchY=e.clientY;}});
   document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(!locked && pointerWasLocked && !paused){pointerUnlockTime=performance.now();setPaused(true,true);}pointerWasLocked=locked;if(!locked && !paused){cancelWebGrab();swing(false);}});
   for (const id of ['forward','back','left','right','sprint','jump','swing','bomb','zip','slap','dodge']) {
     const button=document.getElementById(id);
@@ -6517,7 +6629,7 @@
     audioState:()=>({context:soundContext?.state||'locked',enabled:effectsEnabled,paused,foleyLoaded:Boolean(foleyBuffer)||fallbackSound,windLoaded:Boolean(windBuffer),engineLoaded:Boolean(engineBuffer),nukeFallActive:Boolean(nukeFallTone),nukeFallMuted:nukeFallTone instanceof HTMLMediaElement?nukeFallTone.muted:null,surface:footstepSurface(),played:soundStats.played,active:activeSounds.size+fallbackVoices.size,last:soundStats.last,recent:[...soundStats.recent],errors:[...soundStats.errors],bus:effectsBus?.gain.value??null,windGain:windGain?.gain.value??null,engineGain:engineGain?.gain.value??null}),
     playEffect,playVoice,audioNodes:()=>({context:soundContext,bus:effectsBus}),
     state:()=>({rope:Boolean(rope),onGround,speed:velocity.length(),chaosScore,comboPoints,opinion,anchor:rope?.anchor,slapChain,slapCooldown,dodgeCooldown,padCooldown,camera:cameraMode,cameraNear,viewDistance,airTrick:airTrick?{...airTrick}:null,cityEvent:cityEvent?.type||null,nuke:nuke?.phase||null})};
-  applySuit(progress.suit);updateHeroHud();
+  applySuit(progress.suit);updateHeroHud();buildSettingsUi();
   for(const b of playerBuildingColliders) {
     const minX=Math.floor((b.x-b.w/2-1)/40),maxX=Math.floor((b.x+b.w/2+1)/40),minZ=Math.floor((b.z-b.d/2-1)/40),maxZ=Math.floor((b.z+b.d/2+1)/40);
     for(let x=minX;x<=maxX;x++)for(let z=minZ;z<=maxZ;z++){const key=`${x},${z}`;if(!playerColliderCells.has(key))playerColliderCells.set(key,[]);playerColliderCells.get(key).push(b);}
